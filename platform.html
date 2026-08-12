@@ -406,7 +406,20 @@
         }
     </style>
 <script type="module">
-  import { auth, onAuthStateChanged, signOut, getUserProfile } from './firebase-init.js';
+  import {
+    auth, db, onAuthStateChanged, signOut, getUserProfile,
+    doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs,
+    onSnapshot, writeBatch, serverTimestamp
+  } from './firebase-init.js';
+
+  // Expose to the classic (non-module) app script further down the page.
+  // Module scripts always finish running before DOMContentLoaded fires,
+  // so by the time the app script's DOMContentLoaded handler runs,
+  // window.STEP_FS is guaranteed to be ready.
+  window.STEP_FS = {
+    fsdb: db, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
+    getDocs, onSnapshot, writeBatch, serverTimestamp
+  };
 
   onAuthStateChanged(auth, async (user) => {
     if (!user) { window.location.href = 'index.html'; return; }
@@ -424,6 +437,10 @@
       const link = document.getElementById('adminPanelLink');
       if (link) link.classList.remove('hidden');
     }
+
+    // Let the app script know it's safe to start loading candidate data.
+    window.STEP_AUTH_READY = true;
+    window.dispatchEvent(new CustomEvent('step-auth-ready'));
   });
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -1003,7 +1020,6 @@
             "data:application/pdf;base64,JVBERi0xLjQKJSDigJzCocKwCjEgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDIgMCBSCj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovQ291bnQgMQovS2lkcyBbMyAwIFJdCj4+CmVuZG9iagozIDAgb2JqCjw8Ci9UeXBlIC9QYWdlCi9QYXJlbnQgMiAwIFIKL01lZGlhQm94IFswIDAgNjEyIDc5Ml0KL0NvbnRlbnRzIDQgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8IC9MZW5ndGggNTUgPj4Kc3RyZWFtCkJUMCAwIDAgUkcgL0YxIDEyIFRmIDUwIDcwMCBUZCAoU1RFUCBNYW8gZGUgT2JyYSAtIFNhbXBsZSBEb2N1bWVudCkgVGogRUQKZW5kc3RyZWFtCmVuZG9iagp0cmFpbGVyCjw8Ci9Sb290IDEgMCBSCj4+CiUlRU9G";
 
         // ─── STATE ─────────────────────────────────────────────────
-        let db = null;
         let candidates = [];
         let filteredCandidates = [];
         let selectedCandidateIds = new Set();
@@ -1135,64 +1151,106 @@
             notes: []
         }];
 
-        // ─── INDEXEDDB ─────────────────────────────────────────────
+        // ─── CLOUD DATA LAYER (Firestore) ─────────────────────────
+        // Same function names/contracts as before (initDB, saveCandidateToDB,
+        // saveAllCandidatesToDB, deleteCandidateFromDB, triggerAutoSave) so
+        // none of the ~40 call sites elsewhere in this file needed to change —
+        // only what's underneath them moved from the browser's local IndexedDB
+        // to a shared Firestore database everyone's device reads/writes to.
+        const LEGACY_DB_NAME = 'STEP_MaoDeObra_DB'; // old local-only IndexedDB, used only for one-time migration
+        let liveSyncUnsubscribe = null;
+
+        function fs() { return window.STEP_FS; }
+
+        // Firestore rejects `undefined` values outright — strip them recursively
+        // so any half-filled form field doesn't break a save.
+        function stripUndefined(value) {
+            if (Array.isArray(value)) return value.map(stripUndefined);
+            if (value && typeof value === 'object') {
+                const out = {};
+                Object.keys(value).forEach(k => {
+                    if (value[k] !== undefined) out[k] = stripUndefined(value[k]);
+                });
+                return out;
+            }
+            return value;
+        }
+
         function initDB() {
-            return new Promise((resolve, reject) => {
-                const request = indexedDB.open(DB_NAME, DB_VERSION);
-                request.onupgradeneeded = (e) => {
-                    db = e.target.result;
-                    if (!db.objectStoreNames.contains(STORE_CANDIDATES)) {
-                        db.createObjectStore(STORE_CANDIDATES, { keyPath: 'id' });
-                    }
-                };
-                request.onsuccess = (e) => {
-                    db = e.target.result;
-                    loadCandidatesFromDB().then(resolve);
-                };
-                request.onerror = (e) => reject(e);
+            return loadCandidatesFromDB().then(() => {
+                const { onSnapshot, collection, fsdb } = fs();
+                liveSyncUnsubscribe = onSnapshot(collection(fsdb, 'candidates'), (snap) => {
+                    // Skip refresh while someone's actively editing a record in
+                    // the modal so we don't yank the form out from under them.
+                    if (currentModalCandidateId) return;
+                    candidates = snap.docs.map(d => d.data());
+                    renderAllViews();
+                }, (err) => console.error('Live sync error:', err));
             });
         }
 
         function loadCandidatesFromDB() {
+            const { getDocs, collection, fsdb } = fs();
+            return getDocs(collection(fsdb, 'candidates')).then(snap => {
+                candidates = snap.docs.map(d => d.data());
+                if (candidates.length === 0) {
+                    return checkForLegacyLocalData().then(legacy => {
+                        candidates = legacy && legacy.length ? legacy : JSON.parse(JSON.stringify(MOCK_SEED_CANDIDATES));
+                        return saveAllCandidatesToDB();
+                    });
+                }
+            });
+        }
+
+        // One-time helper: if this browser has old candidate data sitting in
+        // its local IndexedDB from before the cloud migration, pull it in
+        // instead of silently overwriting it with the demo seed data.
+        function checkForLegacyLocalData() {
             return new Promise((resolve) => {
-                const tx = db.transaction(STORE_CANDIDATES, 'readonly');
-                const store = tx.objectStore(STORE_CANDIDATES);
-                const req = store.getAll();
-                req.onsuccess = () => {
-                    candidates = req.result || [];
-                    if (candidates.length === 0) {
-                        candidates = JSON.parse(JSON.stringify(MOCK_SEED_CANDIDATES));
-                        saveAllCandidatesToDB();
-                    }
-                    resolve();
+                if (!window.indexedDB) return resolve(null);
+                const req = indexedDB.open(LEGACY_DB_NAME);
+                req.onupgradeneeded = () => { try { req.transaction.abort(); } catch (e) {} };
+                req.onerror = () => resolve(null);
+                req.onsuccess = (e) => {
+                    const legacyDb = e.target.result;
+                    if (!legacyDb.objectStoreNames.contains('candidates')) { legacyDb.close(); return resolve(null); }
+                    const tx = legacyDb.transaction('candidates', 'readonly');
+                    const store = tx.objectStore('candidates');
+                    const getAllReq = store.getAll();
+                    getAllReq.onsuccess = () => { legacyDb.close(); resolve(getAllReq.result || null); };
+                    getAllReq.onerror = () => { legacyDb.close(); resolve(null); };
                 };
             });
         }
 
         function saveCandidateToDB(cand) {
-            return new Promise((resolve) => {
-                showSavingIndicator();
-                const tx = db.transaction(STORE_CANDIDATES, 'readwrite');
-                const store = tx.objectStore(STORE_CANDIDATES);
-                store.put(cand);
-                tx.oncomplete = () => { hideSavingIndicator(); resolve(); };
-            });
+            showSavingIndicator();
+            const { setDoc, doc, fsdb } = fs();
+            return setDoc(doc(fsdb, 'candidates', cand.id), stripUndefined(cand))
+                .then(() => { hideSavingIndicator(); })
+                .catch(err => { hideSavingIndicator(); console.error('Save failed:', err); alert('Could not save — check your connection and try again.'); });
         }
 
         function saveAllCandidatesToDB() {
-            const tx = db.transaction(STORE_CANDIDATES, 'readwrite');
-            const store = tx.objectStore(STORE_CANDIDATES);
-            candidates.forEach(c => store.put(c));
+            showSavingIndicator();
+            const { writeBatch, doc, fsdb } = fs();
+            const list = candidates.slice();
+            const chunks = [];
+            for (let i = 0; i < list.length; i += 450) chunks.push(list.slice(i, i + 450));
+            return chunks.reduce((p, chunk) => p.then(() => {
+                const batch = writeBatch(fsdb);
+                chunk.forEach(c => batch.set(doc(fsdb, 'candidates', c.id), stripUndefined(c)));
+                return batch.commit();
+            }), Promise.resolve()).then(() => hideSavingIndicator())
+              .catch(err => { hideSavingIndicator(); console.error('Bulk save failed:', err); alert('Some records failed to save — check your connection and try again.'); });
         }
 
         function deleteCandidateFromDB(id) {
-            return new Promise((resolve) => {
-                showSavingIndicator();
-                const tx = db.transaction(STORE_CANDIDATES, 'readwrite');
-                const store = tx.objectStore(STORE_CANDIDATES);
-                store.delete(id);
-                tx.oncomplete = () => { hideSavingIndicator(); resolve(); };
-            });
+            showSavingIndicator();
+            const { deleteDoc, doc, fsdb } = fs();
+            return deleteDoc(doc(fsdb, 'candidates', id))
+                .then(() => { hideSavingIndicator(); })
+                .catch(err => { hideSavingIndicator(); console.error('Delete failed:', err); alert('Could not delete — check your connection and try again.'); });
         }
 
         function triggerAutoSave(candidate) {
@@ -2459,7 +2517,11 @@
 
         // ─── INIT ──────────────────────────────────────────────────
         document.addEventListener('DOMContentLoaded', () => {
-            initDB().then(() => { renderAllViews(); });
+            function whenAuthReady(cb) {
+                if (window.STEP_AUTH_READY) cb();
+                else window.addEventListener('step-auth-ready', cb, { once: true });
+            }
+            whenAuthReady(() => { initDB().then(() => { renderAllViews(); }); });
 
             // View switchers
             document.querySelectorAll('[data-view]').forEach(btn => {
@@ -2686,4 +2748,3 @@
     </script>
 </body>
 </html>
-
