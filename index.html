@@ -399,13 +399,25 @@
         <div class="field">
           <div class="input-wrap">
             <input
+              type="email"
+              id="email"
+              name="email"
+              placeholder="Work Email"
+              autocomplete="username"
+              autofocus
+              required
+            />
+          </div>
+        </div>
+        <div class="field">
+          <div class="input-wrap">
+            <input
               type="password"
               id="password"
               name="password"
               placeholder="Enter Password"
               autocomplete="current-password"
               aria-describedby="capsNote errorMsg"
-              autofocus
               required
             />
             <button type="button" class="toggle-visibility" id="toggleVisibility" aria-label="Show password" aria-pressed="false">
@@ -433,7 +445,7 @@
             </span>
             <span class="label">Remember this device</span>
           </label>
-          <a href="#" class="forgot" aria-disabled="true" tabindex="-1" onclick="return false;">Forgot password?</a>
+          <a href="#" class="forgot" id="forgotLink">Forgot password?</a>
         </div>
 
         <button type="submit" class="enter-btn" id="enterBtn" aria-label="Enter Platform">
@@ -455,17 +467,22 @@
     <div class="footline">AUTH-STEP-01 &nbsp;//&nbsp; <b>Encrypted session</b> &nbsp;//&nbsp; Unauthorized access prohibited</div>
   </main>
 
-<script>
+<script type="module">
+import {
+  auth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
+  sendPasswordResetEmail, getUserProfile
+} from './firebase-init.js';
+
 (function(){
   'use strict';
 
   var CONFIG = {
-    correctPassword: 'Step2026',
     redirectUrl: 'platform.html',
     rememberKey: 'step_mdo_remember_device'
   };
 
   var form        = document.getElementById('loginForm');
+  var emailInput  = document.getElementById('email');
   var input       = document.getElementById('password');
   var toggleBtn   = document.getElementById('toggleVisibility');
   var eyeIcon     = document.getElementById('eyeIcon');
@@ -473,6 +490,7 @@
   var errorMsg    = document.getElementById('errorMsg');
   var enterBtn    = document.getElementById('enterBtn');
   var rememberBox = document.getElementById('rememberMe');
+  var forgotLink  = document.getElementById('forgotLink');
 
   try {
     if (localStorage.getItem(CONFIG.rememberKey) === '1') {
@@ -497,25 +515,25 @@
   });
   input.addEventListener('blur', function () { capsNote.classList.remove('show'); });
 
-  input.addEventListener('input', function () {
-    input.classList.remove('error');
-    errorMsg.classList.remove('show');
+  [emailInput, input].forEach(function (el) {
+    el.addEventListener('input', function () {
+      input.classList.remove('error');
+      errorMsg.classList.remove('show');
+    });
   });
-
-  function validatePassword(candidate) {
-    return Promise.resolve(candidate === CONFIG.correctPassword);
-  }
 
   function setLoading(isLoading) {
     enterBtn.classList.toggle('loading', isLoading);
     enterBtn.disabled = isLoading;
   }
 
-  function showError() {
+  function showError(message) {
+    if (message) {
+      errorMsg.lastChild.textContent = message;
+    }
     input.classList.remove('success');
     input.classList.add('error');
     errorMsg.classList.add('show');
-    input.select();
     setTimeout(function () { input.classList.remove('error'); }, 450);
   }
 
@@ -535,24 +553,75 @@
     }, 550);
   }
 
+  forgotLink.addEventListener('click', function (e) {
+    e.preventDefault();
+    var value = (emailInput.value || '').trim();
+    if (!value) {
+      emailInput.focus();
+      showError('Enter your email above first, then click "Forgot password?" again.');
+      return;
+    }
+    sendPasswordResetEmail(auth, value).then(function () {
+      showError('Reset link sent — check your inbox.');
+      errorMsg.style.color = 'var(--success)';
+    }).catch(function () {
+      // Don't reveal whether the email exists — same message either way.
+      showError('If that email has an account, a reset link was sent.');
+      errorMsg.style.color = 'var(--success)';
+    });
+  });
+
   form.addEventListener('submit', function (e) {
     e.preventDefault();
     if (enterBtn.disabled) return;
 
-    var value = input.value;
-    if (!value) { showError(); return; }
+    var emailValue = (emailInput.value || '').trim();
+    var passValue  = input.value;
+    if (!emailValue || !passValue) { showError('Please enter your email and password.'); return; }
 
+    errorMsg.style.color = '';
     setLoading(true);
-
     var start = Date.now();
-    validatePassword(value).then(function (ok) {
+
+    signInWithEmailAndPassword(auth, emailValue, passValue).then(function (cred) {
+      return getUserProfile(cred.user.uid).then(function (profile) {
+        var elapsed = Date.now() - start;
+        var wait = Math.max(0, 650 - elapsed);
+        setTimeout(function () {
+          if (!profile) {
+            setLoading(false);
+            showError('No profile found for this account. Contact your admin.');
+            signOut(auth);
+            return;
+          }
+          if (profile.active === false) {
+            setLoading(false);
+            showError('This account has been deactivated. Contact your admin.');
+            signOut(auth);
+            return;
+          }
+          showSuccessAndRedirect();
+        }, wait);
+      });
+    }).catch(function (err) {
       var elapsed = Date.now() - start;
       var wait = Math.max(0, 650 - elapsed);
       setTimeout(function () {
-        if (ok) { showSuccessAndRedirect(); }
-        else { setLoading(false); showError(); }
+        setLoading(false);
+        showError('Incorrect email or password. Please try again.');
       }, wait);
     });
+  });
+
+  // If already logged in (and remembered), skip straight to the platform.
+  onAuthStateChanged(auth, function (user) {
+    if (user && localStorage.getItem(CONFIG.rememberKey) === '1') {
+      getUserProfile(user.uid).then(function (profile) {
+        if (profile && profile.active !== false) {
+          window.location.href = CONFIG.redirectUrl;
+        }
+      });
+    }
   });
 })();
 </script>
