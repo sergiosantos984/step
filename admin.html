@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>STEP – Mão de Obra | Admin</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+<style>
+  :root{
+    --bg-0:#04070c; --bg-1:#081018; --bg-2:#0d1c28;
+    --steel:#4a5b6c; --steel-soft:#8393a1;
+    --ink:#ffffff; --ink-dim:#aab8c2;
+    --accent:#38bdf8; --accent-2:#7dd3fc; --accent-dim:rgba(56,189,248,0.16);
+    --success:#10b981; --success-dim:rgba(16,185,129,0.14);
+    --error:#ef4444; --error-dim:rgba(239,68,68,0.14);
+    --border:rgba(255,255,255,0.09);
+    --card-bg:rgba(13, 28, 40, 0.68);
+    --radius-card:18px; --radius-input:12px;
+    --ease:cubic-bezier(.4,0,.2,1);
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; -webkit-font-smoothing:antialiased; }
+  html,body{ min-height:100%; }
+  body{
+    font-family:'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background:
+      radial-gradient(1200px 800px at 15% 0%, rgba(56,189,248,0.12), transparent 60%),
+      var(--bg-0);
+    color:var(--ink);
+    min-height:100vh;
+    padding:32px 20px 80px;
+  }
+  .wrap{ max-width:960px; margin:0 auto; }
+  header{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:28px; flex-wrap:wrap; }
+  .title{ font-family:'Outfit',sans-serif; font-weight:700; font-size:24px; letter-spacing:.2px; }
+  .title span{ color:var(--accent-2); }
+  .subtitle{ color:var(--ink-dim); font-size:13px; margin-top:2px; }
+  .top-actions{ display:flex; gap:10px; }
+  .btn{
+    font-family:inherit; font-size:13px; font-weight:600; letter-spacing:.2px;
+    padding:10px 16px; border-radius:10px; border:1px solid var(--border);
+    background:rgba(255,255,255,0.04); color:var(--ink); cursor:pointer;
+    transition:background .15s var(--ease), border-color .15s var(--ease);
+  }
+  .btn:hover{ background:rgba(255,255,255,0.08); }
+  .btn.primary{ background:var(--accent); border-color:var(--accent); color:#062330; }
+  .btn.primary:hover{ background:var(--accent-2); }
+  .btn.ghost-danger{ color:#fca5a5; }
+  .btn.ghost-danger:hover{ background:var(--error-dim); border-color:rgba(239,68,68,0.4); }
+  .btn:disabled{ opacity:.5; cursor:not-allowed; }
+
+  .card{
+    background:var(--card-bg); border:1px solid var(--border); border-radius:var(--radius-card);
+    backdrop-filter:blur(20px); padding:24px; margin-bottom:24px;
+  }
+  .card h2{ font-family:'Outfit',sans-serif; font-size:16px; font-weight:600; margin-bottom:16px; }
+
+  form.add-form{ display:grid; grid-template-columns:1.2fr 1.2fr 1fr .9fr auto; gap:10px; align-items:end; }
+  @media (max-width:800px){ form.add-form{ grid-template-columns:1fr 1fr; } }
+  .field label{ display:block; font-size:12px; color:var(--ink-dim); margin-bottom:6px; }
+  .field input, .field select{
+    width:100%; padding:10px 12px; border-radius:var(--radius-input);
+    border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--ink); font-size:14px;
+    font-family:inherit;
+  }
+  .field input:focus, .field select:focus{ outline:none; border-color:var(--accent); }
+
+  table{ width:100%; border-collapse:collapse; font-size:14px; }
+  th{ text-align:left; color:var(--ink-dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.04em; padding:0 10px 10px; border-bottom:1px solid var(--border); }
+  td{ padding:12px 10px; border-bottom:1px solid rgba(255,255,255,0.05); vertical-align:middle; }
+  tr:last-child td{ border-bottom:none; }
+  .name{ font-weight:600; }
+  .email{ color:var(--ink-dim); font-size:12.5px; }
+  .badge{ display:inline-block; padding:3px 9px; border-radius:99px; font-size:11px; font-weight:600; letter-spacing:.02em; }
+  .badge.admin{ background:var(--accent-dim); color:var(--accent-2); }
+  .badge.employee{ background:rgba(255,255,255,0.07); color:var(--ink-dim); }
+  .badge.active{ background:var(--success-dim); color:#6ee7b7; }
+  .badge.inactive{ background:var(--error-dim); color:#fca5a5; }
+  .row-actions{ display:flex; gap:6px; flex-wrap:wrap; }
+  .row-actions button{ font-size:12px; padding:6px 10px; }
+
+  .msg{ font-size:13px; padding:10px 14px; border-radius:10px; margin-bottom:16px; display:none; }
+  .msg.show{ display:block; }
+  .msg.ok{ background:var(--success-dim); color:#6ee7b7; }
+  .msg.err{ background:var(--error-dim); color:#fca5a5; }
+
+  #gate{ position:fixed; inset:0; background:var(--bg-0); display:flex; align-items:center; justify-content:center; color:var(--ink-dim); font-size:14px; z-index:50; }
+  .hidden{ display:none !important; }
+  .temp-pass-note{ font-size:12px; color:var(--ink-dim); margin-top:4px; }
+  code{ background:rgba(255,255,255,0.06); padding:1px 6px; border-radius:6px; font-family:'JetBrains Mono',monospace; font-size:12px; }
+</style>
+</head>
+<body>
+
+<div id="gate">Checking access…</div>
+
+<div class="wrap hidden" id="appRoot">
+  <header>
+    <div>
+      <div class="title">STEP <span>Admin</span></div>
+      <div class="subtitle" id="whoami"></div>
+    </div>
+    <div class="top-actions">
+      <a href="platform.html" class="btn">← Back to Platform</a>
+      <button class="btn ghost-danger" id="signOutBtn">Sign out</button>
+    </div>
+  </header>
+
+  <div class="msg" id="flashMsg"></div>
+
+  <div class="card">
+    <h2>Add employee</h2>
+    <form class="add-form" id="addForm">
+      <div class="field">
+        <label>Full name</label>
+        <input type="text" id="newName" required />
+      </div>
+      <div class="field">
+        <label>Work email</label>
+        <input type="email" id="newEmail" required />
+      </div>
+      <div class="field">
+        <label>Temporary password</label>
+        <input type="text" id="newPassword" required minlength="6" placeholder="min. 6 characters" />
+      </div>
+      <div class="field">
+        <label>Role</label>
+        <select id="newRole">
+          <option value="employee">Employee</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <button type="submit" class="btn primary" id="addBtn">Create account</button>
+    </form>
+    <div class="temp-pass-note">Tell the employee this password directly (e.g. in person or a private message). They should change it via "Forgot password?" on the login screen the first time they sign in.</div>
+  </div>
+
+  <div class="card">
+    <h2>Employees</h2>
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Role</th><th>Status</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="userRows">
+        <tr><td colspan="4" style="color:var(--ink-dim);">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script type="module">
+import {
+  auth, db, onAuthStateChanged, signOut, getUserProfile,
+  doc, setDoc, updateDoc, collection, getDocs, serverTimestamp,
+  sendPasswordResetEmail, firebaseConfig, initializeApp, deleteApp,
+  getAuth, createUserWithEmailAndPassword
+} from './firebase-init.js';
+
+const gate       = document.getElementById('gate');
+const appRoot     = document.getElementById('appRoot');
+const whoami      = document.getElementById('whoami');
+const flashMsg    = document.getElementById('flashMsg');
+const userRows    = document.getElementById('userRows');
+const addForm     = document.getElementById('addForm');
+const addBtn      = document.getElementById('addBtn');
+
+let currentUid = null;
+
+function flash(text, ok) {
+  flashMsg.textContent = text;
+  flashMsg.className = 'msg show ' + (ok ? 'ok' : 'err');
+  setTimeout(() => flashMsg.classList.remove('show'), 4500);
+}
+
+// ---- Access gate: must be logged in AND role === 'admin' AND active ----
+onAuthStateChanged(auth, async (user) => {
+  if (!user) { window.location.href = 'index.html'; return; }
+  const profile = await getUserProfile(user.uid);
+  if (!profile || profile.active === false || profile.role !== 'admin') {
+    gate.textContent = "You don't have admin access. Redirecting…";
+    setTimeout(() => window.location.href = 'platform.html', 1200);
+    return;
+  }
+  currentUid = user.uid;
+  whoami.textContent = `Signed in as ${profile.name || profile.email} · Admin`;
+  gate.classList.add('hidden');
+  appRoot.classList.remove('hidden');
+  loadUsers();
+});
+
+document.getElementById('signOutBtn').addEventListener('click', () => {
+  signOut(auth).then(() => window.location.href = 'index.html');
+});
+
+// ---- Load & render employee list ----
+async function loadUsers() {
+  userRows.innerHTML = '<tr><td colspan="4" style="color:var(--ink-dim);">Loading…</td></tr>';
+  const snap = await getDocs(collection(db, 'users'));
+  const users = [];
+  snap.forEach(d => users.push({ id: d.id, ...d.data() }));
+  users.sort((a, b) => (a.name || a.email || '').localeCompare(b.name || b.email || ''));
+
+  if (users.length === 0) {
+    userRows.innerHTML = '<tr><td colspan="4" style="color:var(--ink-dim);">No employees yet.</td></tr>';
+    return;
+  }
+
+  userRows.innerHTML = '';
+  users.forEach(u => {
+    const tr = document.createElement('tr');
+    const isActive = u.active !== false;
+    const isAdmin  = u.role === 'admin';
+    tr.innerHTML = `
+      <td>
+        <div class="name">${escapeHtml(u.name || '(no name)')}</div>
+        <div class="email">${escapeHtml(u.email || '')}</div>
+      </td>
+      <td><span class="badge ${isAdmin ? 'admin' : 'employee'}">${isAdmin ? 'Admin' : 'Employee'}</span></td>
+      <td><span class="badge ${isActive ? 'active' : 'inactive'}">${isActive ? 'Active' : 'Deactivated'}</span></td>
+      <td class="row-actions">
+        <button class="btn" data-action="reset" data-id="${u.id}" data-email="${escapeHtml(u.email || '')}">Send reset email</button>
+        <button class="btn" data-action="role" data-id="${u.id}" data-role="${isAdmin ? 'employee' : 'admin'}">${isAdmin ? 'Make employee' : 'Make admin'}</button>
+        <button class="btn ${isActive ? 'ghost-danger' : ''}" data-action="toggle" data-id="${u.id}" data-active="${isActive}">${isActive ? 'Deactivate' : 'Reactivate'}</button>
+      </td>
+    `;
+    userRows.appendChild(tr);
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ---- Row action clicks (event delegation) ----
+userRows.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const id = btn.dataset.id;
+
+  if (action === 'reset') {
+    const email = btn.dataset.email;
+    if (!email) return flash('No email on file for this user.', false);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      flash(`Reset link sent to ${email}.`, true);
+    } catch (err) {
+      flash('Could not send reset email: ' + err.message, false);
+    }
+  }
+
+  if (action === 'toggle') {
+    if (id === currentUid) return flash("You can't deactivate your own account.", false);
+    const isActive = btn.dataset.active === 'true';
+    try {
+      await updateDoc(doc(db, 'users', id), { active: !isActive });
+      flash(isActive ? 'Employee deactivated.' : 'Employee reactivated.', true);
+      loadUsers();
+    } catch (err) {
+      flash('Update failed: ' + err.message, false);
+    }
+  }
+
+  if (action === 'role') {
+    if (id === currentUid) return flash("You can't change your own role here.", false);
+    const newRole = btn.dataset.role;
+    try {
+      await updateDoc(doc(db, 'users', id), { role: newRole });
+      flash(`Role updated to ${newRole}.`, true);
+      loadUsers();
+    } catch (err) {
+      flash('Update failed: ' + err.message, false);
+    }
+  }
+});
+
+// ---- Add employee (secondary Firebase app so we don't sign the admin out) ----
+addForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = document.getElementById('newName').value.trim();
+  const email = document.getElementById('newEmail').value.trim();
+  const password = document.getElementById('newPassword').value;
+  const role = document.getElementById('newRole').value;
+
+  if (!name || !email || password.length < 6) {
+    return flash('Please fill in all fields (password needs 6+ characters).', false);
+  }
+
+  addBtn.disabled = true;
+  addBtn.textContent = 'Creating…';
+
+  const secondaryApp = initializeApp(firebaseConfig, 'secondary-' + Date.now());
+  const secondaryAuth = getAuth(secondaryApp);
+
+  try {
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    const uid = cred.user.uid;
+    await signOut(secondaryAuth);
+    await deleteApp(secondaryApp);
+
+    await setDoc(doc(db, 'users', uid), {
+      name, email, role, active: true, createdAt: serverTimestamp()
+    });
+
+    flash(`Account created for ${name}. Share the password with them directly.`, true);
+    addForm.reset();
+    loadUsers();
+  } catch (err) {
+    let msg = err.message;
+    if (err.code === 'auth/email-already-in-use') msg = 'That email already has an account.';
+    flash('Could not create account: ' + msg, false);
+    try { await deleteApp(secondaryApp); } catch (_) {}
+  } finally {
+    addBtn.disabled = false;
+    addBtn.textContent = 'Create account';
+  }
+});
+</script>
+</body>
+</html>
