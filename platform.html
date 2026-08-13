@@ -1305,6 +1305,75 @@
             document.body.removeChild(link);
         }
 
+        // ─── DRIVE DOCUMENT BRIDGE ────────────────────────────────
+        // Uploaded documents are sent to a small Google Apps Script
+        // ("Drive Bridge") which saves them into Sergio's Drive and
+        // hands back a link. Firestore only ever stores that link,
+        // never the file bytes — keeping candidate records small and
+        // documents safely in Drive as intended.
+        //
+        // >>> PASTE YOUR DEPLOYED WEB APP URL BELOW (ends in /exec) <<<
+        const DRIVE_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycbzomz3XFMnYAhN7w3AGds7ykcJU8n8Ucphgh_8mk8dtkfYSYTa7xX9defqsz6FWMX9g/exec';
+        const DRIVE_BRIDGE_SECRET = '1h3Px5Ug_bmWB6NttWusaHvif6c9hbTAGabhynMvX9Y';
+
+        function driveBridgeCall(payload) {
+            if (!DRIVE_BRIDGE_URL || DRIVE_BRIDGE_URL.indexOf('PASTE_YOUR') === 0) {
+                return Promise.reject(new Error('Drive Bridge URL not configured yet.'));
+            }
+            return fetch(DRIVE_BRIDGE_URL, {
+                method: 'POST',
+                // text/plain avoids a CORS preflight that Apps Script can't answer.
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(Object.assign({ secret: DRIVE_BRIDGE_SECRET }, payload))
+            }).then(r => r.json()).then(res => {
+                if (!res.ok) throw new Error(res.error || 'Drive Bridge request failed');
+                return res;
+            });
+        }
+
+        function readFileAsBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // Uploads a File object to Drive, returns { fileId, fileUrl, viewUrl, docName }
+        function uploadFileToDrive(file, candidateId) {
+            return readFileAsBase64(file).then(base64Data => driveBridgeCall({
+                action: 'upload',
+                candidateId: candidateId,
+                fileName: sanitizeFileName(file.name),
+                mimeType: file.type,
+                base64Data: base64Data
+            }));
+        }
+
+        // Best-effort delete — if it fails (already gone, offline, etc.)
+        // we don't want that to block removing the record locally.
+        function deleteFileFromDrive(fileId) {
+            if (!fileId) return Promise.resolve();
+            return driveBridgeCall({ action: 'delete', fileId: fileId }).catch(err => {
+                console.warn('Drive delete failed (continuing anyway):', err);
+            });
+        }
+
+        function fetchFileContentFromDrive(fileId) {
+            return driveBridgeCall({ action: 'downloadContent', fileId: fileId });
+        }
+
+        // Opens/downloads an attachment regardless of whether it's a new
+        // Drive-hosted item ({fileUrl}) or an old embedded item ({fileData}
+        // from before this migration).
+        function openOrDownloadAttachment(item, fallbackName) {
+            if (item && item.viewUrl) { window.open(item.viewUrl, '_blank'); return; }
+            if (item && item.fileUrl) { window.open(item.fileUrl, '_blank'); return; }
+            if (item && item.fileData) { downloadFile(item.docName || fallbackName, item.fileData); return; }
+            downloadFile(fallbackName, MOCK_PDF_BASE64);
+        }
+
         // ─── FILTER / SEARCH ──────────────────────────────────────
         function filterCandidates() {
             const query = document.getElementById('globalSearchInput').value.toLowerCase().trim();
@@ -1871,7 +1940,7 @@
               <div><span class="font-bold block text-[#0f172a]">${c.name}</span><span class="text-[#64748b] text-[10px]">Expires: ${c.expiryDate||'N/A'}</span></div>
               <div class="flex items-center gap-2">
                 <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${badge}">${days<=0?'Expired':`${days}d`}</span>
-                <button onclick="downloadFile('${c.docName||'Certificate.pdf'}','${c.fileData||MOCK_PDF_BASE64}')" class="apple-btn apple-btn-secondary apple-btn-xs">Download</button>
+                <button onclick="downloadCertFile('${c.id}')" class="apple-btn apple-btn-secondary apple-btn-xs">Download</button>
                 <label class="apple-btn apple-btn-secondary apple-btn-xs cursor-pointer">Replace File<input type="file" onchange="uploadFileToExistingCert('${c.id}',event)" class="hidden" accept=".pdf,.doc,.docx,.jpg,.png" /></label>
                 <button onclick="deleteCertification('${c.id}')" class="p-1 text-rose-500 hover:bg-rose-50 rounded" title="Delete"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
               </div>
@@ -1881,33 +1950,47 @@
             lucide.createIcons();
         }
 
+        function downloadCertFile(certId) {
+            const cand = candidates.find(c => c.id === currentModalCandidateId);
+            const cert = cand && (cand.certifications || []).find(c => c.id === certId);
+            openOrDownloadAttachment(cert, 'Certificate.pdf');
+        }
+
         function uploadFileToExistingCert(certId, e) {
             const file = e.target.files[0];
             if (!file || !currentModalCandidateId) return;
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-                const cand = candidates.find(c => c.id === currentModalCandidateId);
-                if (cand) {
-                    const cert = (cand.certifications || []).find(crt => crt.id === certId);
-                    if (cert) {
-                        cert.docName = file.name;
-                        cert.fileData = evt.target.result;
-                        triggerAutoSave(cand);
-                        renderCertificationsList(cand);
-                        renderCandidateTable();
-                    }
-                }
-            };
-            reader.readAsDataURL(file);
+            const cand = candidates.find(c => c.id === currentModalCandidateId);
+            if (!cand) return;
+            const cert = (cand.certifications || []).find(crt => crt.id === certId);
+            if (!cert) return;
+            const oldFileId = cert.fileId;
+            showSavingIndicator();
+            uploadFileToDrive(file, cand.id).then(res => {
+                cert.docName = res.docName;
+                cert.fileId = res.fileId;
+                cert.fileUrl = res.fileUrl;
+                cert.viewUrl = res.viewUrl;
+                delete cert.fileData; // drop any legacy embedded copy
+                triggerAutoSave(cand);
+                renderCertificationsList(cand);
+                renderCandidateTable();
+                hideSavingIndicator();
+                if (oldFileId) deleteFileFromDrive(oldFileId);
+            }).catch(err => {
+                hideSavingIndicator();
+                alert('Upload failed: ' + err.message);
+            });
         }
 
         function deleteCertification(certId) {
             const cand = candidates.find(c => c.id === currentModalCandidateId);
             if (cand && cand.certifications) {
+                const cert = cand.certifications.find(c => c.id === certId);
                 cand.certifications = cand.certifications.filter(c => c.id !== certId);
                 triggerAutoSave(cand);
                 renderCertificationsList(cand);
                 renderCandidateTable();
+                if (cert && cert.fileId) deleteFileFromDrive(cert.fileId);
             }
         }
 
@@ -1924,7 +2007,7 @@
               <div><span class="font-bold block text-[#0f172a]">${m.type}</span><span class="text-[#64748b] text-[10px]">Expires: ${m.expiryDate||'N/A'}</span></div>
               <div class="flex items-center gap-2">
                 <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${badge}">${days<=0?'Expired':`${days}d`}</span>
-                <button onclick="downloadFile('${m.docName||'Medical.pdf'}','${m.fileData||MOCK_PDF_BASE64}')" class="apple-btn apple-btn-secondary apple-btn-xs">Download</button>
+                <button onclick="downloadMedicalFile('${m.id}')" class="apple-btn apple-btn-secondary apple-btn-xs">Download</button>
                 <label class="apple-btn apple-btn-secondary apple-btn-xs cursor-pointer">Replace File<input type="file" onchange="uploadFileToExistingMedical('${m.id}',event)" class="hidden" accept=".pdf,.doc,.docx,.jpg,.png" /></label>
                 <button onclick="deleteMedical('${m.id}')" class="p-1 text-rose-500 hover:bg-rose-50 rounded" title="Delete"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
               </div>
@@ -1934,33 +2017,47 @@
             lucide.createIcons();
         }
 
+        function downloadMedicalFile(medId) {
+            const cand = candidates.find(c => c.id === currentModalCandidateId);
+            const med = cand && (cand.medicals || []).find(m => m.id === medId);
+            openOrDownloadAttachment(med, 'Medical.pdf');
+        }
+
         function uploadFileToExistingMedical(medId, e) {
             const file = e.target.files[0];
             if (!file || !currentModalCandidateId) return;
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-                const cand = candidates.find(c => c.id === currentModalCandidateId);
-                if (cand) {
-                    const med = (cand.medicals || []).find(m => m.id === medId);
-                    if (med) {
-                        med.docName = file.name;
-                        med.fileData = evt.target.result;
-                        triggerAutoSave(cand);
-                        renderMedicalsList(cand);
-                        renderCandidateTable();
-                    }
-                }
-            };
-            reader.readAsDataURL(file);
+            const cand = candidates.find(c => c.id === currentModalCandidateId);
+            if (!cand) return;
+            const med = (cand.medicals || []).find(m => m.id === medId);
+            if (!med) return;
+            const oldFileId = med.fileId;
+            showSavingIndicator();
+            uploadFileToDrive(file, cand.id).then(res => {
+                med.docName = res.docName;
+                med.fileId = res.fileId;
+                med.fileUrl = res.fileUrl;
+                med.viewUrl = res.viewUrl;
+                delete med.fileData;
+                triggerAutoSave(cand);
+                renderMedicalsList(cand);
+                renderCandidateTable();
+                hideSavingIndicator();
+                if (oldFileId) deleteFileFromDrive(oldFileId);
+            }).catch(err => {
+                hideSavingIndicator();
+                alert('Upload failed: ' + err.message);
+            });
         }
 
         function deleteMedical(medId) {
             const cand = candidates.find(c => c.id === currentModalCandidateId);
             if (cand && cand.medicals) {
+                const med = cand.medicals.find(m => m.id === medId);
                 cand.medicals = cand.medicals.filter(m => m.id !== medId);
                 triggerAutoSave(cand);
                 renderMedicalsList(cand);
                 renderCandidateTable();
+                if (med && med.fileId) deleteFileFromDrive(med.fileId);
             }
         }
 
@@ -1974,7 +2071,7 @@
                 div.innerHTML = `
               <div><span class="font-bold block text-[#0f172a]">${v.type} (${v.country})</span><span class="text-[#64748b] text-[10px]">Expires: ${v.expiryDate||'N/A'}</span></div>
               <div class="flex items-center gap-2">
-                <button onclick="downloadFile('${v.docName||'Visa.pdf'}','${v.fileData||MOCK_PDF_BASE64}')" class="apple-btn apple-btn-secondary apple-btn-xs">Download</button>
+                <button onclick="downloadVisaFile('${v.id}')" class="apple-btn apple-btn-secondary apple-btn-xs">Download</button>
                 <label class="apple-btn apple-btn-secondary apple-btn-xs cursor-pointer">Replace File<input type="file" onchange="uploadFileToExistingVisa('${v.id}',event)" class="hidden" accept=".pdf,.doc,.docx,.jpg,.png" /></label>
                 <button onclick="deleteVisa('${v.id}')" class="p-1 text-rose-500 hover:bg-rose-50 rounded" title="Delete"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
               </div>
@@ -1984,33 +2081,47 @@
             lucide.createIcons();
         }
 
+        function downloadVisaFile(visaId) {
+            const cand = candidates.find(c => c.id === currentModalCandidateId);
+            const visa = cand && (cand.visas || []).find(v => v.id === visaId);
+            openOrDownloadAttachment(visa, 'Visa.pdf');
+        }
+
         function uploadFileToExistingVisa(visaId, e) {
             const file = e.target.files[0];
             if (!file || !currentModalCandidateId) return;
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-                const cand = candidates.find(c => c.id === currentModalCandidateId);
-                if (cand) {
-                    const visa = (cand.visas || []).find(v => v.id === visaId);
-                    if (visa) {
-                        visa.docName = file.name;
-                        visa.fileData = evt.target.result;
-                        triggerAutoSave(cand);
-                        renderVisasList(cand);
-                        renderCandidateTable();
-                    }
-                }
-            };
-            reader.readAsDataURL(file);
+            const cand = candidates.find(c => c.id === currentModalCandidateId);
+            if (!cand) return;
+            const visa = (cand.visas || []).find(v => v.id === visaId);
+            if (!visa) return;
+            const oldFileId = visa.fileId;
+            showSavingIndicator();
+            uploadFileToDrive(file, cand.id).then(res => {
+                visa.docName = res.docName;
+                visa.fileId = res.fileId;
+                visa.fileUrl = res.fileUrl;
+                visa.viewUrl = res.viewUrl;
+                delete visa.fileData;
+                triggerAutoSave(cand);
+                renderVisasList(cand);
+                renderCandidateTable();
+                hideSavingIndicator();
+                if (oldFileId) deleteFileFromDrive(oldFileId);
+            }).catch(err => {
+                hideSavingIndicator();
+                alert('Upload failed: ' + err.message);
+            });
         }
 
         function deleteVisa(visaId) {
             const cand = candidates.find(c => c.id === currentModalCandidateId);
             if (cand && cand.visas) {
+                const visa = cand.visas.find(v => v.id === visaId);
                 cand.visas = cand.visas.filter(v => v.id !== visaId);
                 triggerAutoSave(cand);
                 renderVisasList(cand);
                 renderCandidateTable();
+                if (visa && visa.fileId) deleteFileFromDrive(visa.fileId);
             }
         }
 
@@ -2030,7 +2141,7 @@
                 div.innerHTML = `
               <div class="flex items-center gap-3"><div class="p-2 rounded-lg bg-brand-50 text-brand-600"><i data-lucide="file-text" class="w-4 h-4"></i></div><div><span class="font-bold block text-[#0f172a]">${doc.docName||'Document_'+(idx+1)+'.pdf'}</span><span class="text-[10px] text-[#94a3b8]">Uploaded: ${doc.uploadDate||'Recently'}</span></div></div>
               <div class="flex items-center gap-2">
-                <button onclick="downloadFile('${doc.docName||'document.pdf'}','${doc.fileData||MOCK_PDF_BASE64}')" class="apple-btn apple-btn-sm"><i data-lucide="download" class="w-3.5 h-3.5"></i> Download</button>
+                <button onclick="downloadCandidateDocument(${idx})" class="apple-btn apple-btn-sm"><i data-lucide="download" class="w-3.5 h-3.5"></i> Download</button>
                 <button onclick="deleteCandidateDocument(${idx})" class="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition" title="Delete"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
               </div>
             `;
@@ -2039,32 +2150,44 @@
             lucide.createIcons();
         }
 
+        function downloadCandidateDocument(idx) {
+            const cand = candidates.find(c => c.id === currentModalCandidateId);
+            const doc = cand && (cand.documents || [])[idx];
+            openOrDownloadAttachment(doc, 'document.pdf');
+        }
+
         function handleModalDocumentUpload(e) {
             const file = e.target.files[0];
             if (!file || !currentModalCandidateId) return;
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-                const base64Data = evt.target.result;
-                const cand = candidates.find(c => c.id === currentModalCandidateId);
-                if (cand) {
-                    if (!cand.documents) cand.documents = [];
-                    cand.documents.push({ id: 'doc_' + Date.now(), docName: file.name, fileType: file.type,
-                        uploadDate: new Date().toISOString().split('T')[0], fileData: base64Data });
-                    triggerAutoSave(cand);
-                    renderModalDocsList(cand);
-                    renderCandidateTable();
-                }
-            };
-            reader.readAsDataURL(file);
+            const cand = candidates.find(c => c.id === currentModalCandidateId);
+            if (!cand) return;
+            showSavingIndicator();
+            uploadFileToDrive(file, cand.id).then(res => {
+                if (!cand.documents) cand.documents = [];
+                cand.documents.push({
+                    id: 'doc_' + Date.now(), docName: res.docName, fileType: file.type,
+                    uploadDate: new Date().toISOString().split('T')[0],
+                    fileId: res.fileId, fileUrl: res.fileUrl, viewUrl: res.viewUrl
+                });
+                triggerAutoSave(cand);
+                renderModalDocsList(cand);
+                renderCandidateTable();
+                hideSavingIndicator();
+            }).catch(err => {
+                hideSavingIndicator();
+                alert('Upload failed: ' + err.message);
+            });
         }
 
         function deleteCandidateDocument(docIdx) {
             const cand = candidates.find(c => c.id === currentModalCandidateId);
             if (cand && cand.documents) {
+                const doc = cand.documents[docIdx];
                 cand.documents.splice(docIdx, 1);
                 triggerAutoSave(cand);
                 renderModalDocsList(cand);
                 renderCandidateTable();
+                if (doc && doc.fileId) deleteFileFromDrive(doc.fileId);
             }
         }
 
@@ -2284,20 +2407,20 @@
                 const expiryDate = document.getElementById('addCertExpiryDate').value;
                 const fileInput = document.getElementById('addCertFileInput');
                 const file = fileInput?.files[0];
-                const certObj = { id: 'c_' + Date.now(), name, issueDate, expiryDate, docName: file ? file.name :
-                        `${name}.pdf`, fileData: MOCK_PDF_BASE64 };
+                const certObj = { id: 'c_' + Date.now(), name, issueDate, expiryDate, docName: file ? file.name : `${name}.pdf` };
                 if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (evt) => {
-                        certObj.fileData = evt.target.result;
+                    showSavingIndicator();
+                    uploadFileToDrive(file, cand.id).then(res => {
+                        certObj.docName = res.docName; certObj.fileId = res.fileId;
+                        certObj.fileUrl = res.fileUrl; certObj.viewUrl = res.viewUrl;
                         if (!cand.certifications) cand.certifications = [];
                         cand.certifications.push(certObj);
                         triggerAutoSave(cand);
                         renderCertificationsList(cand);
                         renderCandidateTable();
+                        hideSavingIndicator();
                         closeAddEntryModal();
-                    };
-                    reader.readAsDataURL(file);
+                    }).catch(err => { hideSavingIndicator(); alert('Upload failed: ' + err.message); });
                 } else {
                     if (!cand.certifications) cand.certifications = [];
                     cand.certifications.push(certObj);
@@ -2313,20 +2436,20 @@
                 const expiryDate = document.getElementById('addMedExpiryDate').value;
                 const fileInput = document.getElementById('addMedFileInput');
                 const file = fileInput?.files[0];
-                const medObj = { id: 'm_' + Date.now(), type, issueDate, expiryDate, docName: file ? file.name :
-                        `${type}.pdf`, fileData: MOCK_PDF_BASE64 };
+                const medObj = { id: 'm_' + Date.now(), type, issueDate, expiryDate, docName: file ? file.name : `${type}.pdf` };
                 if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (evt) => {
-                        medObj.fileData = evt.target.result;
+                    showSavingIndicator();
+                    uploadFileToDrive(file, cand.id).then(res => {
+                        medObj.docName = res.docName; medObj.fileId = res.fileId;
+                        medObj.fileUrl = res.fileUrl; medObj.viewUrl = res.viewUrl;
                         if (!cand.medicals) cand.medicals = [];
                         cand.medicals.push(medObj);
                         triggerAutoSave(cand);
                         renderMedicalsList(cand);
                         renderCandidateTable();
+                        hideSavingIndicator();
                         closeAddEntryModal();
-                    };
-                    reader.readAsDataURL(file);
+                    }).catch(err => { hideSavingIndicator(); alert('Upload failed: ' + err.message); });
                 } else {
                     if (!cand.medicals) cand.medicals = [];
                     cand.medicals.push(medObj);
@@ -2342,20 +2465,20 @@
                 const expiryDate = document.getElementById('addVisaExpiryDate').value;
                 const fileInput = document.getElementById('addVisaFileInput');
                 const file = fileInput?.files[0];
-                const visaObj = { id: 'v_' + Date.now(), type, country, expiryDate, docName: file ? file.name :
-                        `${type}_${country}.pdf`, fileData: MOCK_PDF_BASE64 };
+                const visaObj = { id: 'v_' + Date.now(), type, country, expiryDate, docName: file ? file.name : `${type}_${country}.pdf` };
                 if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (evt) => {
-                        visaObj.fileData = evt.target.result;
+                    showSavingIndicator();
+                    uploadFileToDrive(file, cand.id).then(res => {
+                        visaObj.docName = res.docName; visaObj.fileId = res.fileId;
+                        visaObj.fileUrl = res.fileUrl; visaObj.viewUrl = res.viewUrl;
                         if (!cand.visas) cand.visas = [];
                         cand.visas.push(visaObj);
                         triggerAutoSave(cand);
                         renderVisasList(cand);
                         renderCandidateTable();
+                        hideSavingIndicator();
                         closeAddEntryModal();
-                    };
-                    reader.readAsDataURL(file);
+                    }).catch(err => { hideSavingIndicator(); alert('Upload failed: ' + err.message); });
                 } else {
                     if (!cand.visas) cand.visas = [];
                     cand.visas.push(visaObj);
@@ -2481,6 +2604,11 @@
             let fileCount = 0;
             const usedFolderNames = new Set();
 
+            // Gather (folder, name, item) triples first, then fetch content
+            // one at a time — Drive-hosted files are pulled through the Drive
+            // Bridge (Drive's raw links can't be fetched cross-origin from JS),
+            // legacy embedded files just use their stored base64 directly.
+            const jobs = [];
             list.forEach(cand => {
                 let folderName = sanitizeFileName(cand.name || 'Candidate');
                 let uniqueName = folderName;
@@ -2489,30 +2617,44 @@
                 usedFolderNames.add(uniqueName);
                 const folder = zip.folder(uniqueName);
 
-                const addDoc = (name, fileData) => {
-                    const source = fileData || MOCK_PDF_BASE64;
-                    const commaIdx = source.indexOf(',');
-                    const raw = commaIdx >= 0 ? source.slice(commaIdx + 1) : source;
-                    if (raw) { folder.file(sanitizeFileName(name), raw, { base64: true }); fileCount++; }
-                };
+                const queue = (name, item) => { if (item && (item.fileId || item.fileData)) jobs.push({ folder, name, item }); };
 
-                if (cand.documents && cand.documents.length) { cand.documents.forEach(d => addDoc(d.docName || 'Document.pdf', d.fileData)); }
-                else { addDoc(`CV_${(cand.name||'Candidate').replace(/\s+/g,'_')}.pdf`, null); }
-                (cand.certifications || []).forEach(c => addDoc(c.docName || `Certificate_${c.name||''}.pdf`, c.fileData));
-                (cand.medicals || []).forEach(m => addDoc(m.docName || `Medical_${m.type||''}.pdf`, m.fileData));
-                (cand.visas || []).forEach(v => addDoc(v.docName || `Visa_${v.type||''}_${v.country||''}.pdf`, v.fileData));
+                (cand.documents || []).forEach(d => queue(d.docName || 'Document.pdf', d));
+                (cand.certifications || []).forEach(c => queue(c.docName || `Certificate_${c.name||''}.pdf`, c));
+                (cand.medicals || []).forEach(m => queue(m.docName || `Medical_${m.type||''}.pdf`, m));
+                (cand.visas || []).forEach(v => queue(v.docName || `Visa_${v.type||''}_${v.country||''}.pdf`, v));
             });
 
-            if (fileCount === 0) { alert('No documents found to download.'); return; }
-            zip.generateAsync({ type: 'blob' }).then(content => {
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(content);
-                link.download = 'STEP_MaoDeObra_All_Documents.zip';
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(link.href);
-            }).catch(() => alert('Failed to build ZIP. Please try again.'));
+            if (jobs.length === 0) { alert('No documents found to download.'); return; }
+
+            showSavingIndicator();
+            const runJob = (job) => {
+                if (job.item.fileId) {
+                    return fetchFileContentFromDrive(job.item.fileId).then(res => {
+                        job.folder.file(sanitizeFileName(job.name), res.base64, { base64: true });
+                        fileCount++;
+                    }).catch(err => console.warn('Skipping (Drive fetch failed):', job.name, err));
+                }
+                const source = job.item.fileData;
+                const commaIdx = source.indexOf(',');
+                const raw = commaIdx >= 0 ? source.slice(commaIdx + 1) : source;
+                if (raw) { job.folder.file(sanitizeFileName(job.name), raw, { base64: true }); fileCount++; }
+                return Promise.resolve();
+            };
+
+            jobs.reduce((p, job) => p.then(() => runJob(job)), Promise.resolve()).then(() => {
+                hideSavingIndicator();
+                if (fileCount === 0) { alert('No documents could be retrieved.'); return; }
+                return zip.generateAsync({ type: 'blob' }).then(content => {
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(content);
+                    link.download = 'STEP_MaoDeObra_All_Documents.zip';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(link.href);
+                });
+            }).catch(() => { hideSavingIndicator(); alert('Failed to build ZIP. Please try again.'); });
         }
 
         // ─── INIT ──────────────────────────────────────────────────
