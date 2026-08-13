@@ -206,9 +206,39 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   mapField.style.display = 'block';
+  const fieldRect = mapField.getBoundingClientRect();
+  const positions = locations.map(loc => latLngToPercent(loc.lat || 0, loc.lng || 0));
+
+  // Push apart any pins that would render too close together (as percent
+  // positions, converted using the field's actual on-screen size) so
+  // cards never stack on top of each other, regardless of how close the
+  // real-world coordinates happen to be for a small set of locations.
+  const minDistPx = 150;
+  for (let pass = 0; pass < 40; pass++) {
+    let moved = false;
+    for (let i = 0; i < positions.length; i++) {
+      for (let j = i + 1; j < positions.length; j++) {
+        const dx = (positions[j].x - positions[i].x) / 100 * fieldRect.width;
+        const dy = (positions[j].y - positions[i].y) / 100 * fieldRect.height;
+        const dist = Math.hypot(dx, dy) || 0.001;
+        if (dist < minDistPx) {
+          moved = true;
+          const push = (minDistPx - dist) / 2;
+          const ux = dx / dist, uy = dy / dist;
+          positions[i].x -= (ux * push / fieldRect.width) * 100;
+          positions[i].y -= (uy * push / fieldRect.height) * 100;
+          positions[j].x += (ux * push / fieldRect.width) * 100;
+          positions[j].y += (uy * push / fieldRect.height) * 100;
+        }
+      }
+    }
+    if (!moved) break;
+  }
+  positions.forEach(p => { p.x = Math.min(94, Math.max(6, p.x)); p.y = Math.min(88, Math.max(12, p.y)); });
+
   locations.forEach((loc, i) => {
     const allowed = isGlobalAdmin || grants[loc.id] === true;
-    const pos = latLngToPercent(loc.lat || 0, loc.lng || 0);
+    const pos = positions[i];
     const pin = document.createElement('div');
     pin.className = 'pin' + (allowed ? '' : ' locked');
     pin.style.left = pos.x + '%';
