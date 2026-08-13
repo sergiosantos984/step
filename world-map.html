@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>STEP – Mão de Obra | Select Location</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+<style>
+  :root{
+    --bg-0:#04070c; --bg-1:#081018; --bg-2:#0d1c28;
+    --steel:#4a5b6c; --steel-soft:#8393a1;
+    --ink:#ffffff; --ink-dim:#aab8c2;
+    --accent:#38bdf8; --accent-2:#7dd3fc; --accent-dim:rgba(56,189,248,0.16);
+    --success:#10b981; --success-dim:rgba(16,185,129,0.14);
+    --error:#ef4444; --error-dim:rgba(239,68,68,0.14);
+    --border:rgba(255,255,255,0.09);
+    --card-bg:rgba(13, 28, 40, 0.68);
+    --ease:cubic-bezier(.4,0,.2,1);
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; -webkit-font-smoothing:antialiased; }
+  html,body{ height:100%; }
+  body{
+    font-family:'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background:
+      radial-gradient(1400px 900px at 50% -10%, rgba(56,189,248,0.10), transparent 55%),
+      radial-gradient(900px 600px at 90% 100%, rgba(16,185,129,0.06), transparent 55%),
+      var(--bg-0);
+    color:var(--ink);
+    min-height:100vh;
+    display:flex; flex-direction:column;
+    overflow-x:hidden;
+  }
+
+  header{ display:flex; align-items:center; justify-content:space-between; padding:22px 32px; }
+  .brand{ display:flex; align-items:center; gap:10px; font-family:'Outfit',sans-serif; font-weight:700; font-size:16px; letter-spacing:.2px; }
+  .brand .mark{ width:30px; height:30px; border-radius:9px; background:linear-gradient(135deg,var(--accent),#0ea5e9); display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:800; color:#04141c; }
+  .brand span{ color:var(--accent-2); }
+  header .who{ font-size:12.5px; color:var(--ink-dim); display:flex; align-items:center; gap:14px; }
+  header .who button{
+    font-family:inherit; font-size:12.5px; font-weight:600; color:var(--ink-dim);
+    background:rgba(255,255,255,0.04); border:1px solid var(--border); padding:8px 14px; border-radius:9px; cursor:pointer;
+    transition:background .15s var(--ease);
+  }
+  header .who button:hover{ background:rgba(255,255,255,0.09); color:var(--ink); }
+
+  .stage{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:20px 20px 60px; position:relative; }
+
+  .eyebrow{
+    font-family:'JetBrains Mono', monospace; font-size:11px; letter-spacing:.22em; text-transform:uppercase;
+    color:var(--accent-2); display:flex; align-items:center; gap:8px; margin-bottom:14px; opacity:0;
+    animation: fadeUp .7s var(--ease) .1s forwards;
+  }
+  .eyebrow .dot{ width:6px; height:6px; border-radius:50%; background:var(--accent); box-shadow:0 0 10px var(--accent); }
+  h1{
+    font-family:'Outfit',sans-serif; font-weight:700; font-size:clamp(26px,4vw,40px); text-align:center;
+    letter-spacing:-.01em; margin-bottom:8px; opacity:0; animation: fadeUp .7s var(--ease) .2s forwards;
+  }
+  .sub{ color:var(--ink-dim); font-size:14px; text-align:center; margin-bottom:48px; opacity:0; animation: fadeUp .7s var(--ease) .3s forwards; }
+
+  @keyframes fadeUp{ from{ opacity:0; transform:translateY(14px); } to{ opacity:1; transform:translateY(0); } }
+
+  /* ── Globe field: a soft dotted starfield / constellation backdrop
+     rather than a literal cartographic map — matches the cinematic,
+     abstract-premium look rather than a generic maps app. */
+  .field{
+    position:relative; width:min(920px, 92vw); aspect-ratio:16/8.5;
+    border-radius:28px; border:1px solid var(--border);
+    background:
+      radial-gradient(650px 420px at 50% 45%, rgba(56,189,248,0.07), transparent 70%),
+      linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
+    overflow:hidden;
+    opacity:0; animation: fadeUp .8s var(--ease) .4s forwards;
+  }
+  .field::before{
+    content:''; position:absolute; inset:0;
+    background-image: radial-gradient(rgba(255,255,255,0.10) 1px, transparent 1px);
+    background-size: 26px 26px;
+    mask-image: radial-gradient(circle at 50% 50%, black 0%, black 55%, transparent 85%);
+    -webkit-mask-image: radial-gradient(circle at 50% 50%, black 0%, black 55%, transparent 85%);
+  }
+  .field .arc{ position:absolute; border:1px solid rgba(56,189,248,0.14); border-radius:50%; }
+  .field .arc.a1{ width:70%; height:140%; left:15%; top:-20%; }
+  .field .arc.a2{ width:45%; height:90%; left:27.5%; top:5%; }
+
+  .pin{
+    position:absolute; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center;
+    cursor:pointer; opacity:0; animation: fadeUp .6s var(--ease) forwards;
+  }
+  .pin .dot-wrap{ position:relative; width:16px; height:16px; }
+  .pin .pulse{
+    position:absolute; inset:0; border-radius:50%; background:var(--accent);
+    animation: pulse 2.2s ease-out infinite;
+  }
+  .pin .core{
+    position:absolute; inset:3px; border-radius:50%; background:var(--accent-2);
+    box-shadow:0 0 14px 2px var(--accent);
+  }
+  .pin.locked .pulse{ display:none; }
+  .pin.locked .core{ background:var(--steel); box-shadow:none; }
+  @keyframes pulse{
+    0%{ transform:scale(1); opacity:.55; }
+    100%{ transform:scale(3.2); opacity:0; }
+  }
+  .pin-card{
+    margin-top:12px; padding:10px 16px; border-radius:12px; background:rgba(8,16,24,0.92);
+    border:1px solid var(--border); backdrop-filter:blur(10px); text-align:center; min-width:128px;
+    transition:transform .2s var(--ease), border-color .2s var(--ease), box-shadow .2s var(--ease);
+  }
+  .pin:hover .pin-card{ transform:translateY(-3px); border-color:rgba(56,189,248,0.4); box-shadow:0 8px 30px rgba(56,189,248,0.12); }
+  .pin.locked:hover .pin-card{ transform:none; border-color:var(--border); box-shadow:none; }
+  .pin-flag{ font-size:22px; line-height:1; margin-bottom:4px; }
+  .pin-name{ font-family:'Outfit',sans-serif; font-weight:600; font-size:13px; }
+  .pin-status{ font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; margin-top:3px; }
+  .pin-status.active{ color:#6ee7b7; }
+  .pin-status.locked{ color:var(--steel-soft); display:flex; align-items:center; justify-content:center; gap:4px; }
+
+  #loadingNote{ color:var(--ink-dim); font-size:13.5px; }
+  #emptyNote{ display:none; color:var(--ink-dim); font-size:13.5px; text-align:center; max-width:420px; }
+
+  footer{ text-align:center; padding:20px; color:var(--steel-soft); font-size:11.5px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><div class="mark">S</div>STEP <span>Mão de Obra</span></div>
+  <div class="who">
+    <span id="whoami"></span>
+    <a id="adminLink" href="admin.html" class="hidden" style="text-decoration:none;"><button type="button">Admin panel</button></a>
+    <button id="signOutBtn">Sign out</button>
+  </div>
+</header>
+
+<div class="stage">
+  <div class="eyebrow"><span class="dot"></span>SELECT YOUR WORKSPACE</div>
+  <h1>Where are you working from?</h1>
+  <div class="sub" id="subline">Each location is a fully separate workspace — its own candidates, documents, and reports.</div>
+
+  <div id="loadingNote">Loading your access…</div>
+  <div id="emptyNote">You don't have access to any locations yet. Ask your admin to grant you access.</div>
+  <div class="field" id="mapField" style="display:none;">
+    <div class="arc a1"></div>
+    <div class="arc a2"></div>
+  </div>
+</div>
+
+<footer>STEP Mão de Obra · Industrial &amp; Energy Talent Platform</footer>
+
+<script type="module">
+import {
+  auth, db, onAuthStateChanged, signOut, getUserProfile,
+  collection, getDocs
+} from './firebase-init.js';
+
+const mapField   = document.getElementById('mapField');
+const loadingNote = document.getElementById('loadingNote');
+const emptyNote  = document.getElementById('emptyNote');
+const whoami     = document.getElementById('whoami');
+
+document.getElementById('signOutBtn').addEventListener('click', () => {
+  signOut(auth).then(() => window.location.href = 'index.html');
+});
+
+// Converts lat/lng into a percentage position within the abstract field,
+// using a simple equirectangular mapping. Works for any future location
+// added to locations_meta — no code changes needed to place a new pin.
+function latLngToPercent(lat, lng) {
+  const x = ((lng + 180) / 360) * 100;
+  const y = ((90 - lat) / 180) * 100;
+  return { x: Math.min(94, Math.max(6, x)), y: Math.min(88, Math.max(12, y)) };
+}
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) { window.location.href = 'index.html'; return; }
+  const profile = await getUserProfile(user.uid);
+  if (!profile || profile.active === false) {
+    await signOut(auth);
+    window.location.href = 'index.html';
+    return;
+  }
+  whoami.textContent = profile.name || profile.email || '';
+  const isGlobalAdmin = profile.role === 'admin';
+  if (isGlobalAdmin) document.getElementById('adminLink').classList.remove('hidden');
+  const grants = profile.locations || {};
+
+  const snap = await getDocs(collection(db, 'locations_meta'));
+  const locations = [];
+  snap.forEach(d => locations.push({ id: d.id, ...d.data() }));
+  locations.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  loadingNote.style.display = 'none';
+
+  const accessible = locations.filter(l => isGlobalAdmin || grants[l.id] === true);
+  if (locations.length === 0) {
+    emptyNote.textContent = 'No locations have been set up yet. An admin needs to add one from the admin panel.';
+    emptyNote.style.display = 'block';
+    return;
+  }
+  if (accessible.length === 0) {
+    emptyNote.style.display = 'block';
+    return;
+  }
+
+  mapField.style.display = 'block';
+  locations.forEach((loc, i) => {
+    const allowed = isGlobalAdmin || grants[loc.id] === true;
+    const pos = latLngToPercent(loc.lat || 0, loc.lng || 0);
+    const pin = document.createElement('div');
+    pin.className = 'pin' + (allowed ? '' : ' locked');
+    pin.style.left = pos.x + '%';
+    pin.style.top = pos.y + '%';
+    pin.style.animationDelay = (0.5 + i * 0.12) + 's';
+    pin.innerHTML = `
+      <div class="dot-wrap"><div class="pulse"></div><div class="core"></div></div>
+      <div class="pin-card">
+        <div class="pin-flag">${loc.flag || '📍'}</div>
+        <div class="pin-name">${loc.name || loc.id}</div>
+        <div class="pin-status ${allowed ? 'active' : 'locked'}">${allowed ? 'Active' : '🔒 Locked'}</div>
+      </div>
+    `;
+    if (allowed) {
+      pin.addEventListener('click', () => {
+        sessionStorage.setItem('step_active_location', loc.id);
+        window.location.href = 'platform.html';
+      });
+    }
+    mapField.appendChild(pin);
+  });
+});
+</script>
+</body>
+</html>
