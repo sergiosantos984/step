@@ -63,60 +63,56 @@
 
   @keyframes fadeUp{ from{ opacity:0; transform:translateY(14px); } to{ opacity:1; transform:translateY(0); } }
 
-  /* ── Globe field: a soft dotted starfield / constellation backdrop
-     rather than a literal cartographic map — matches the cinematic,
-     abstract-premium look rather than a generic maps app. */
+  /* ── World map: continents rendered as dot-filled shapes inside one
+     SVG (viewBox 1000x500, plain equirectangular projection) so pins,
+     placed with the same lat/lng formula, always land in the right spot. */
   .field{
     position:relative; width:min(920px, 92vw); aspect-ratio:16/8.5;
     border-radius:28px; border:1px solid var(--border);
     background:
-      radial-gradient(650px 420px at 50% 45%, rgba(56,189,248,0.07), transparent 70%),
+      radial-gradient(650px 420px at 50% 45%, rgba(56,189,248,0.06), transparent 70%),
       linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
     overflow:hidden;
     opacity:0; animation: fadeUp .8s var(--ease) .4s forwards;
   }
-  .field::before{
-    content:''; position:absolute; inset:0;
-    background-image: radial-gradient(rgba(255,255,255,0.10) 1px, transparent 1px);
-    background-size: 26px 26px;
-    mask-image: radial-gradient(circle at 50% 50%, black 0%, black 55%, transparent 85%);
-    -webkit-mask-image: radial-gradient(circle at 50% 50%, black 0%, black 55%, transparent 85%);
-  }
-  .field .arc{ position:absolute; border:1px solid rgba(56,189,248,0.14); border-radius:50%; }
+  .field svg{ position:absolute; inset:0; width:100%; height:100%; }
+  .field .continent{ fill:url(#dotPattern); opacity:.9; }
+  .field .arc{ position:absolute; border:1px solid rgba(56,189,248,0.10); border-radius:50%; pointer-events:none; }
   .field .arc.a1{ width:70%; height:140%; left:15%; top:-20%; }
   .field .arc.a2{ width:45%; height:90%; left:27.5%; top:5%; }
 
   .pin{
     position:absolute; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center;
-    cursor:pointer; opacity:0; animation: fadeUp .6s var(--ease) forwards;
+    cursor:pointer; opacity:0; animation: fadeUp .6s var(--ease) forwards; z-index:5;
   }
-  .pin .dot-wrap{ position:relative; width:16px; height:16px; }
+  .pin .dot-wrap{ position:relative; width:14px; height:14px; }
   .pin .pulse{
     position:absolute; inset:0; border-radius:50%; background:var(--accent);
     animation: pulse 2.2s ease-out infinite;
   }
   .pin .core{
     position:absolute; inset:3px; border-radius:50%; background:var(--accent-2);
-    box-shadow:0 0 14px 2px var(--accent);
+    box-shadow:0 0 12px 2px var(--accent);
   }
   .pin.locked .pulse{ display:none; }
   .pin.locked .core{ background:var(--steel); box-shadow:none; }
   @keyframes pulse{
     0%{ transform:scale(1); opacity:.55; }
-    100%{ transform:scale(3.2); opacity:0; }
+    100%{ transform:scale(3); opacity:0; }
   }
   .pin-card{
-    margin-top:12px; padding:10px 16px; border-radius:12px; background:rgba(8,16,24,0.92);
-    border:1px solid var(--border); backdrop-filter:blur(10px); text-align:center; min-width:128px;
+    margin-top:8px; padding:5px 10px; border-radius:9px; background:rgba(8,16,24,0.94);
+    border:1px solid var(--border); backdrop-filter:blur(10px);
+    display:flex; align-items:center; gap:6px; white-space:nowrap;
     transition:transform .2s var(--ease), border-color .2s var(--ease), box-shadow .2s var(--ease);
   }
-  .pin:hover .pin-card{ transform:translateY(-3px); border-color:rgba(56,189,248,0.4); box-shadow:0 8px 30px rgba(56,189,248,0.12); }
+  .pin:hover .pin-card{ transform:translateY(-2px); border-color:rgba(56,189,248,0.4); box-shadow:0 6px 22px rgba(56,189,248,0.12); }
   .pin.locked:hover .pin-card{ transform:none; border-color:var(--border); box-shadow:none; }
-  .pin-flag{ font-size:22px; line-height:1; margin-bottom:4px; }
-  .pin-name{ font-family:'Outfit',sans-serif; font-weight:600; font-size:13px; }
-  .pin-status{ font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; margin-top:3px; }
-  .pin-status.active{ color:#6ee7b7; }
-  .pin-status.locked{ color:var(--steel-soft); display:flex; align-items:center; justify-content:center; gap:4px; }
+  .pin-flag{ font-size:13px; line-height:1; }
+  .pin-name{ font-family:'Outfit',sans-serif; font-weight:600; font-size:11.5px; }
+  .pin-status-dot{ width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+  .pin-status-dot.active{ background:#6ee7b7; box-shadow:0 0 6px #10b981; }
+  .pin-status-dot.locked{ background:var(--steel-soft); }
 
   #loadingNote{ color:var(--ink-dim); font-size:13.5px; }
   #emptyNote{ display:none; color:var(--ink-dim); font-size:13.5px; text-align:center; max-width:420px; }
@@ -143,6 +139,22 @@
   <div id="loadingNote">Loading your access…</div>
   <div id="emptyNote">You don't have access to any locations yet. Ask your admin to grant you access.</div>
   <div class="field" id="mapField" style="display:none;">
+    <svg viewBox="0 0 1000 500" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <pattern id="dotPattern" width="14" height="14" patternUnits="userSpaceOnUse">
+          <circle cx="2" cy="2" r="1.4" fill="rgba(125,211,252,0.55)"></circle>
+        </pattern>
+      </defs>
+      <!-- Simplified low-poly continent shapes, plain equirectangular
+           projection — matches the lat/lng-to-percent formula used for
+           pins below, so pins land in the right place automatically. -->
+      <polygon class="continent" points="41.7,61.1 138.9,97.2 152.8,116.7 236.1,111.1 305.6,125 277.8,180.6 230.6,200 180.6,188.9" />
+      <polygon class="continent" points="277.8,222.2 402.8,263.9 388.9,313.9 305.6,402.8 291.7,305.6" />
+      <polygon class="continent" points="472.2,130.6 500,147.2 555.6,125 583.3,83.3 611.1,69.4" />
+      <polygon class="continent" points="452.8,208.3 533.3,263.9 550,344.4 616.7,291.7 638.9,216.7 597.2,161.1" />
+      <polygon class="continent" points="611.1,125 625,166.7 688.9,180.6 708.3,227.8 791.7,194.4 875,125 888.9,69.4 750,55.6 666.7,97.2" />
+      <polygon class="continent" points="813.9,311.1 825,347.2 902.8,355.6 925,327.8 875,283.3" />
+    </svg>
     <div class="arc a1"></div>
     <div class="arc a2"></div>
   </div>
@@ -213,7 +225,7 @@ onAuthStateChanged(auth, async (user) => {
   // positions, converted using the field's actual on-screen size) so
   // cards never stack on top of each other, regardless of how close the
   // real-world coordinates happen to be for a small set of locations.
-  const minDistPx = 150;
+  const minDistPx = 110;
   for (let pass = 0; pass < 40; pass++) {
     let moved = false;
     for (let i = 0; i < positions.length; i++) {
@@ -247,9 +259,9 @@ onAuthStateChanged(auth, async (user) => {
     pin.innerHTML = `
       <div class="dot-wrap"><div class="pulse"></div><div class="core"></div></div>
       <div class="pin-card">
-        <div class="pin-flag">${loc.flag || '📍'}</div>
-        <div class="pin-name">${loc.name || loc.id}</div>
-        <div class="pin-status ${allowed ? 'active' : 'locked'}">${allowed ? 'Active' : '🔒 Locked'}</div>
+        <span class="pin-flag">${loc.flag || '📍'}</span>
+        <span class="pin-name">${loc.name || loc.id}</span>
+        <span class="pin-status-dot ${allowed ? 'active' : 'locked'}"></span>
       </div>
     `;
     if (allowed) {
