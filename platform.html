@@ -430,6 +430,21 @@
       return;
     }
 
+    // Resolve + validate the active workspace. This is a UX convenience
+    // only — the real enforcement happens in Firestore's security rules,
+    // which independently check this exact same permission on every
+    // single read/write. If someone tampers with this value in the
+    // browser, the database still refuses anything they're not granted.
+    const isGlobalAdmin = profile.role === 'admin';
+    const grants = profile.locations || {};
+    const requestedLocation = sessionStorage.getItem('step_active_location');
+    const allowed = requestedLocation && (isGlobalAdmin || grants[requestedLocation] === true);
+    if (!allowed) {
+      sessionStorage.removeItem('step_active_location');
+      window.location.href = 'world-map.html';
+      return;
+    }
+
     document.body.classList.add('auth-ready');
     const nameEl = document.getElementById('userBadgeName');
     if (nameEl) nameEl.textContent = profile.name || profile.email || '';
@@ -437,6 +452,31 @@
       const link = document.getElementById('adminPanelLink');
       if (link) link.classList.remove('hidden');
     }
+
+    // Populate the location switcher with whatever this user is granted.
+    const locSnap = await getDocs(collection(db, 'locations_meta'));
+    const allLocations = [];
+    locSnap.forEach(d => allLocations.push({ id: d.id, ...d.data() }));
+    const myLocations = allLocations.filter(l => isGlobalAdmin || grants[l.id] === true);
+    const current = allLocations.find(l => l.id === requestedLocation);
+    const labelEl = document.getElementById('locationLabel');
+    if (labelEl) labelEl.textContent = (current ? (current.flag + ' ' + current.name) : requestedLocation);
+    const menuEl = document.getElementById('locationMenu');
+    if (menuEl) {
+      menuEl.innerHTML = '';
+      myLocations.forEach(l => {
+        const item = document.createElement('button');
+        item.className = 'w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-slate-100 flex items-center gap-2' + (l.id === requestedLocation ? ' font-bold text-brand-600' : ' text-[#334155]');
+        item.innerHTML = `<span>${l.flag||'📍'}</span><span>${l.name||l.id}</span>` + (l.id === requestedLocation ? '<span class="ml-auto text-[10px]">Current</span>' : '');
+        item.addEventListener('click', () => {
+          sessionStorage.setItem('step_active_location', l.id);
+          window.location.reload();
+        });
+        menuEl.appendChild(item);
+      });
+    }
+
+    window.STEP_ACTIVE_LOCATION = requestedLocation;
 
     // Let the app script know it's safe to start loading candidate data.
     window.STEP_AUTH_READY = true;
@@ -448,6 +488,18 @@
     if (btn) btn.addEventListener('click', () => {
       signOut(auth).then(() => window.location.href = 'index.html');
     });
+
+    const switcherBtn = document.getElementById('locationSwitcherBtn');
+    const dropdown = document.getElementById('locationDropdown');
+    if (switcherBtn && dropdown) {
+      switcherBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdown.classList.toggle('hidden');
+      });
+      document.addEventListener('click', (e) => {
+        if (!dropdown.contains(e.target) && e.target !== switcherBtn) dropdown.classList.add('hidden');
+      });
+    }
   });
 </script>
 </head>
@@ -542,6 +594,19 @@
             </button>
 
             <div class="flex items-center gap-1.5 pl-2 ml-1 border-l border-slate-200">
+                <div class="relative">
+                    <button id="locationSwitcherBtn" class="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold text-[#334155] hover:bg-slate-100 transition border border-slate-200">
+                        <span id="locationLabel">…</span>
+                        <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <div id="locationDropdown" class="hidden absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-30">
+                        <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-[#94a3b8]">Your Locations</div>
+                        <div id="locationMenu"></div>
+                        <div class="border-t border-slate-100 mt-1 pt-1">
+                            <a href="world-map.html" class="w-full text-left px-3 py-2 text-xs rounded-lg hover:bg-slate-100 flex items-center gap-2 text-[#334155]"><i data-lucide="globe" class="w-3.5 h-3.5"></i> World Map</a>
+                        </div>
+                    </div>
+                </div>
                 <span id="userBadgeName" class="hidden sm:inline text-xs font-semibold text-[#475569] max-w-[140px] truncate"></span>
                 <a id="adminPanelLink" href="admin.html" class="hidden p-2 rounded-full text-[#64748b] hover:bg-slate-100 transition border border-slate-200" title="Admin panel">
                     <i data-lucide="shield" class="w-4 h-4"></i>
@@ -1155,12 +1220,24 @@
         // Same function names/contracts as before (initDB, saveCandidateToDB,
         // saveAllCandidatesToDB, deleteCandidateFromDB, triggerAutoSave) so
         // none of the ~40 call sites elsewhere in this file needed to change —
-        // only what's underneath them moved from the browser's local IndexedDB
-        // to a shared Firestore database everyone's device reads/writes to.
-        const LEGACY_DB_NAME = 'STEP_MaoDeObra_DB'; // old local-only IndexedDB, used only for one-time migration
+        // only what's underneath them moved, first to Firestore, and now to
+        // a path scoped to the active location: locations/{loc}/candidates.
+        // That path IS the data-isolation boundary — Firestore's security
+        // rules independently re-check on every request that this user is
+        // actually granted this location, so this isn't just "which folder
+        // we happen to read from," it's enforced server-side regardless of
+        // what the client sends.
         let liveSyncUnsubscribe = null;
 
         function fs() { return window.STEP_FS; }
+
+        // All candidate reads/writes go through this one path builder so
+        // there's a single place that defines the isolation boundary.
+        function candidatesCollectionPath() {
+            const loc = window.STEP_ACTIVE_LOCATION;
+            if (!loc) throw new Error('No active location set — this should never happen after the auth gate.');
+            return ['locations', loc, 'candidates'];
+        }
 
         // Firestore rejects `undefined` values outright — strip them recursively
         // so any half-filled form field doesn't break a save.
@@ -1179,7 +1256,7 @@
         function initDB() {
             return loadCandidatesFromDB().then(() => {
                 const { onSnapshot, collection, fsdb } = fs();
-                liveSyncUnsubscribe = onSnapshot(collection(fsdb, 'candidates'), (snap) => {
+                liveSyncUnsubscribe = onSnapshot(collection(fsdb, ...candidatesCollectionPath()), (snap) => {
                     // Skip refresh while someone's actively editing a record in
                     // the modal so we don't yank the form out from under them.
                     if (currentModalCandidateId) return;
@@ -1191,42 +1268,17 @@
 
         function loadCandidatesFromDB() {
             const { getDocs, collection, fsdb } = fs();
-            return getDocs(collection(fsdb, 'candidates')).then(snap => {
+            return getDocs(collection(fsdb, ...candidatesCollectionPath())).then(snap => {
                 candidates = snap.docs.map(d => d.data());
-                if (candidates.length === 0) {
-                    return checkForLegacyLocalData().then(legacy => {
-                        candidates = legacy && legacy.length ? legacy : JSON.parse(JSON.stringify(MOCK_SEED_CANDIDATES));
-                        return saveAllCandidatesToDB();
-                    });
-                }
-            });
-        }
-
-        // One-time helper: if this browser has old candidate data sitting in
-        // its local IndexedDB from before the cloud migration, pull it in
-        // instead of silently overwriting it with the demo seed data.
-        function checkForLegacyLocalData() {
-            return new Promise((resolve) => {
-                if (!window.indexedDB) return resolve(null);
-                const req = indexedDB.open(LEGACY_DB_NAME);
-                req.onupgradeneeded = () => { try { req.transaction.abort(); } catch (e) {} };
-                req.onerror = () => resolve(null);
-                req.onsuccess = (e) => {
-                    const legacyDb = e.target.result;
-                    if (!legacyDb.objectStoreNames.contains('candidates')) { legacyDb.close(); return resolve(null); }
-                    const tx = legacyDb.transaction('candidates', 'readonly');
-                    const store = tx.objectStore('candidates');
-                    const getAllReq = store.getAll();
-                    getAllReq.onsuccess = () => { legacyDb.close(); resolve(getAllReq.result || null); };
-                    getAllReq.onerror = () => { legacyDb.close(); resolve(null); };
-                };
+                // A genuinely new, empty location starts empty — we don't seed
+                // demo data into a real workspace automatically.
             });
         }
 
         function saveCandidateToDB(cand) {
             showSavingIndicator();
             const { setDoc, doc, fsdb } = fs();
-            return setDoc(doc(fsdb, 'candidates', cand.id), stripUndefined(cand))
+            return setDoc(doc(fsdb, ...candidatesCollectionPath(), cand.id), stripUndefined(cand))
                 .then(() => { hideSavingIndicator(); })
                 .catch(err => { hideSavingIndicator(); console.error('Save failed:', err); alert('Could not save — check your connection and try again.'); });
         }
@@ -1239,7 +1291,7 @@
             for (let i = 0; i < list.length; i += 450) chunks.push(list.slice(i, i + 450));
             return chunks.reduce((p, chunk) => p.then(() => {
                 const batch = writeBatch(fsdb);
-                chunk.forEach(c => batch.set(doc(fsdb, 'candidates', c.id), stripUndefined(c)));
+                chunk.forEach(c => batch.set(doc(fsdb, ...candidatesCollectionPath(), c.id), stripUndefined(c)));
                 return batch.commit();
             }), Promise.resolve()).then(() => hideSavingIndicator())
               .catch(err => { hideSavingIndicator(); console.error('Bulk save failed:', err); alert('Some records failed to save — check your connection and try again.'); });
@@ -1248,7 +1300,7 @@
         function deleteCandidateFromDB(id) {
             showSavingIndicator();
             const { deleteDoc, doc, fsdb } = fs();
-            return deleteDoc(doc(fsdb, 'candidates', id))
+            return deleteDoc(doc(fsdb, ...candidatesCollectionPath(), id))
                 .then(() => { hideSavingIndicator(); })
                 .catch(err => { hideSavingIndicator(); console.error('Delete failed:', err); alert('Could not delete — check your connection and try again.'); });
         }
