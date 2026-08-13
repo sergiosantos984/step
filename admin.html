@@ -91,6 +91,32 @@
   .hidden{ display:none !important; }
   .temp-pass-note{ font-size:12px; color:var(--ink-dim); margin-top:4px; }
   code{ background:rgba(255,255,255,0.06); padding:1px 6px; border-radius:6px; font-family:'JetBrains Mono',monospace; font-size:12px; }
+
+  .tabs{ display:flex; gap:6px; margin-bottom:20px; border-bottom:1px solid var(--border); }
+  .tab-btn{
+    font-family:inherit; font-size:13.5px; font-weight:600; color:var(--ink-dim);
+    background:none; border:none; padding:10px 4px; margin-right:20px; cursor:pointer;
+    border-bottom:2px solid transparent; transition:color .15s var(--ease), border-color .15s var(--ease);
+  }
+  .tab-btn.active{ color:var(--accent-2); border-bottom-color:var(--accent); }
+  .tab-panel{ display:none; }
+  .tab-panel.active{ display:block; }
+
+  .loc-checks{ display:flex; flex-wrap:wrap; gap:8px 14px; }
+  .loc-check{ display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-dim); }
+  .loc-check input{ accent-color:var(--accent); }
+  .loc-badges{ display:flex; flex-wrap:wrap; gap:4px; }
+  .loc-badge{ font-size:10.5px; padding:2px 7px; border-radius:99px; background:rgba(255,255,255,0.07); color:var(--ink-dim); }
+
+  .overview-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:20px; }
+  .overview-card{ background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:14px; padding:16px; }
+  .overview-card .flag{ font-size:22px; }
+  .overview-card .loc-name{ font-family:'Outfit',sans-serif; font-weight:600; font-size:14px; margin-top:4px; }
+  .overview-card .stat{ font-size:12px; color:var(--ink-dim); margin-top:8px; display:flex; justify-content:space-between; }
+  .overview-card .stat b{ color:var(--ink); font-weight:700; }
+
+  form.loc-form{ display:grid; grid-template-columns:1.4fr .9fr .7fr .7fr auto; gap:10px; align-items:end; }
+  @media (max-width:800px){ form.loc-form{ grid-template-columns:1fr 1fr; } }
 </style>
 </head>
 <body>
@@ -111,52 +137,114 @@
 
   <div class="msg" id="flashMsg"></div>
 
-  <div class="card">
-    <h2>Add employee</h2>
-    <form class="add-form" id="addForm">
-      <div class="field">
-        <label>Full name</label>
-        <input type="text" id="newName" required />
-      </div>
-      <div class="field">
-        <label>Work email</label>
-        <input type="email" id="newEmail" required />
-      </div>
-      <div class="field">
-        <label>Temporary password</label>
-        <input type="text" id="newPassword" required minlength="6" placeholder="min. 6 characters" />
-      </div>
-      <div class="field">
-        <label>Role</label>
-        <select id="newRole">
-          <option value="employee">Employee</option>
-          <option value="admin">Admin</option>
-        </select>
-      </div>
-      <button type="submit" class="btn primary" id="addBtn">Create account</button>
-    </form>
-    <div class="temp-pass-note">Tell the employee this password directly (e.g. in person or a private message). They should change it via "Forgot password?" on the login screen the first time they sign in.</div>
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="employees">Employees</button>
+    <button class="tab-btn" data-tab="locations">Locations</button>
   </div>
 
-  <div class="card">
-    <h2>Employees</h2>
-    <table>
-      <thead>
-        <tr><th>Name</th><th>Role</th><th>Status</th><th>Actions</th></tr>
-      </thead>
-      <tbody id="userRows">
-        <tr><td colspan="4" style="color:var(--ink-dim);">Loading…</td></tr>
-      </tbody>
-    </table>
+  <div class="tab-panel active" id="tab-employees">
+    <div class="card">
+      <h2>Add employee</h2>
+      <form class="add-form" id="addForm">
+        <div class="field">
+          <label>Full name</label>
+          <input type="text" id="newName" required />
+        </div>
+        <div class="field">
+          <label>Work email</label>
+          <input type="email" id="newEmail" required />
+        </div>
+        <div class="field">
+          <label>Temporary password</label>
+          <input type="text" id="newPassword" required minlength="6" placeholder="min. 6 characters" />
+        </div>
+        <div class="field">
+          <label>Role</label>
+          <select id="newRole">
+            <option value="employee">Employee</option>
+            <option value="admin">Admin (all locations)</option>
+          </select>
+        </div>
+        <button type="submit" class="btn primary" id="addBtn">Create account</button>
+      </form>
+      <div class="field" style="margin-top:14px;">
+        <label>Location access (ignored if role is Admin — admins see every location)</label>
+        <div class="loc-checks" id="newLocChecks"></div>
+      </div>
+      <div class="temp-pass-note">Tell the employee this password directly (e.g. in person or a private message). They should change it via "Forgot password?" on the login screen the first time they sign in.</div>
+    </div>
+
+    <div class="card">
+      <h2>Employees</h2>
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Role</th><th>Status</th><th>Locations</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="userRows">
+          <tr><td colspan="5" style="color:var(--ink-dim);">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="tab-panel" id="tab-locations">
+    <div class="card">
+      <h2>Global overview</h2>
+      <div class="overview-grid" id="overviewGrid">
+        <div style="color:var(--ink-dim); font-size:13px;">Loading…</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Add a location</h2>
+      <form class="loc-form" id="addLocForm">
+        <div class="field">
+          <label>Name</label>
+          <input type="text" id="newLocName" placeholder="e.g. Brazil" required />
+        </div>
+        <div class="field">
+          <label>Flag emoji</label>
+          <input type="text" id="newLocFlag" placeholder="🇧🇷" required />
+        </div>
+        <div class="field">
+          <label>Latitude</label>
+          <input type="text" id="newLocLat" placeholder="-15.8" required />
+        </div>
+        <div class="field">
+          <label>Longitude</label>
+          <input type="text" id="newLocLng" placeholder="-47.9" required />
+        </div>
+        <button type="submit" class="btn primary" id="addLocBtn">Add location</button>
+      </form>
+      <div class="temp-pass-note">The location's ID is generated automatically from the name (lowercase, no spaces/accents) — this is the exact ID used to isolate its data, so make sure the name is right before adding it.</div>
+    </div>
+
+    <div class="card">
+      <h2>Existing locations</h2>
+      <table>
+        <thead>
+          <tr><th>Location</th><th>ID</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="locRows">
+          <tr><td colspan="4" style="color:var(--ink-dim);">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>One-time data migration</h2>
+      <p style="font-size:13px; color:var(--ink-dim); margin-bottom:14px;">Candidates created before multi-location support was added live in a single shared collection. Use this once to copy them into the Portugal workspace. Safe to click more than once — it won't create duplicates.</p>
+      <button class="btn" id="migrateBtn">Migrate legacy candidates → Portugal</button>
+    </div>
   </div>
 </div>
 
 <script type="module">
 import {
   auth, db, onAuthStateChanged, signOut, getUserProfile,
-  doc, setDoc, updateDoc, collection, getDocs, serverTimestamp,
+  doc, setDoc, updateDoc, collection, getDocs, getCountFromServer, serverTimestamp,
   sendPasswordResetEmail, firebaseConfig, initializeApp, deleteApp,
-  getAuth, createUserWithEmailAndPassword
+  getAuth, createUserWithEmailAndPassword, writeBatch
 } from './firebase-init.js';
 
 const gate       = document.getElementById('gate');
@@ -166,14 +254,36 @@ const flashMsg    = document.getElementById('flashMsg');
 const userRows    = document.getElementById('userRows');
 const addForm     = document.getElementById('addForm');
 const addBtn      = document.getElementById('addBtn');
+const newLocChecks = document.getElementById('newLocChecks');
+const overviewGrid = document.getElementById('overviewGrid');
+const locRows     = document.getElementById('locRows');
+const addLocForm  = document.getElementById('addLocForm');
+const addLocBtn   = document.getElementById('addLocBtn');
+const migrateBtn  = document.getElementById('migrateBtn');
 
 let currentUid = null;
+let allLocations = [];
+let allUsers = [];
 
 function flash(text, ok) {
   flashMsg.textContent = text;
   flashMsg.className = 'msg show ' + (ok ? 'ok' : 'err');
-  setTimeout(() => flashMsg.classList.remove('show'), 4500);
+  setTimeout(() => flashMsg.classList.remove('show'), 5000);
 }
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ---- Tabs ----
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
 
 // ---- Access gate: must be logged in AND role === 'admin' AND active ----
 onAuthStateChanged(auth, async (user) => {
@@ -181,38 +291,183 @@ onAuthStateChanged(auth, async (user) => {
   const profile = await getUserProfile(user.uid);
   if (!profile || profile.active === false || profile.role !== 'admin') {
     gate.textContent = "You don't have admin access. Redirecting…";
-    setTimeout(() => window.location.href = 'platform.html', 1200);
+    setTimeout(() => window.location.href = 'world-map.html', 1200);
     return;
   }
   currentUid = user.uid;
-  whoami.textContent = `Signed in as ${profile.name || profile.email} · Admin`;
+  whoami.textContent = `Signed in as ${profile.name || profile.email} · Global Admin`;
   gate.classList.add('hidden');
   appRoot.classList.remove('hidden');
-  loadUsers();
+  await loadLocations();
+  await loadUsers();
+  loadOverview();
 });
 
 document.getElementById('signOutBtn').addEventListener('click', () => {
   signOut(auth).then(() => window.location.href = 'index.html');
 });
 
+// ---- Locations ----
+async function loadLocations() {
+  const snap = await getDocs(collection(db, 'locations_meta'));
+  allLocations = [];
+  snap.forEach(d => allLocations.push({ id: d.id, ...d.data() }));
+  allLocations.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  newLocChecks.innerHTML = allLocations.map(l => `
+    <label class="loc-check"><input type="checkbox" data-loc="${l.id}" class="new-loc-check" /> ${l.flag || '📍'} ${escapeHtml(l.name || l.id)}</label>
+  `).join('') || '<span style="color:var(--ink-dim); font-size:12px;">No locations yet — add one in the Locations tab.</span>';
+
+  if (allLocations.length === 0) {
+    locRows.innerHTML = '<tr><td colspan="4" style="color:var(--ink-dim);">No locations yet.</td></tr>';
+    return;
+  }
+  locRows.innerHTML = '';
+  allLocations.forEach(l => {
+    const active = l.active !== false;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><span style="font-size:16px;">${l.flag || '📍'}</span> <span class="name">${escapeHtml(l.name || l.id)}</span></td>
+      <td><code>${escapeHtml(l.id)}</code></td>
+      <td><span class="badge ${active ? 'active' : 'inactive'}">${active ? 'Active' : 'Disabled'}</span></td>
+      <td class="row-actions"><button class="btn ${active ? 'ghost-danger' : ''}" data-loc-toggle="${l.id}" data-active="${active}">${active ? 'Disable' : 'Enable'}</button></td>
+    `;
+    locRows.appendChild(tr);
+  });
+}
+
+locRows.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-loc-toggle]');
+  if (!btn) return;
+  const active = btn.dataset.active === 'true';
+  try {
+    await updateDoc(doc(db, 'locations_meta', btn.dataset.locToggle), { active: !active });
+    flash(active ? 'Location disabled.' : 'Location enabled.', true);
+    loadLocations();
+  } catch (err) {
+    flash('Update failed: ' + err.message, false);
+  }
+});
+
+function slugify(name) {
+  return name.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+addLocForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = document.getElementById('newLocName').value.trim();
+  const flagVal = document.getElementById('newLocFlag').value.trim();
+  const lat = parseFloat(document.getElementById('newLocLat').value);
+  const lng = parseFloat(document.getElementById('newLocLng').value);
+  const id = slugify(name);
+
+  if (!name || !id || isNaN(lat) || isNaN(lng)) return flash('Please fill in all fields with valid values.', false);
+
+  addLocBtn.disabled = true;
+  try {
+    await setDoc(doc(db, 'locations_meta', id), { name, flag: flagVal, lat, lng, active: true, createdAt: serverTimestamp() });
+    flash(`Location "${name}" added (ID: ${id}).`, true);
+    addLocForm.reset();
+    await loadLocations();
+    loadOverview();
+  } catch (err) {
+    flash('Could not add location: ' + err.message, false);
+  } finally {
+    addLocBtn.disabled = false;
+  }
+});
+
+async function loadOverview() {
+  if (allLocations.length === 0) {
+    overviewGrid.innerHTML = '<div style="color:var(--ink-dim); font-size:13px;">No locations yet.</div>';
+    return;
+  }
+  overviewGrid.innerHTML = allLocations.map(l => `
+    <div class="overview-card">
+      <div class="flag">${l.flag || '📍'}</div>
+      <div class="loc-name">${escapeHtml(l.name || l.id)}</div>
+      <div class="stat">Candidates <b id="count-cand-${l.id}">…</b></div>
+      <div class="stat">Users with access <b id="count-users-${l.id}">…</b></div>
+    </div>
+  `).join('');
+
+  allLocations.forEach(async (l) => {
+    try {
+      const countSnap = await getCountFromServer(collection(db, 'locations', l.id, 'candidates'));
+      const el = document.getElementById('count-cand-' + l.id);
+      if (el) el.textContent = countSnap.data().count;
+    } catch (err) {
+      const el = document.getElementById('count-cand-' + l.id);
+      if (el) el.textContent = '—';
+    }
+    const userCount = allUsers.filter(u => u.role === 'admin' || (u.locations && u.locations[l.id] === true)).length;
+    const uEl = document.getElementById('count-users-' + l.id);
+    if (uEl) uEl.textContent = userCount;
+  });
+}
+
+// ---- Legacy migration ----
+migrateBtn.addEventListener('click', async () => {
+  migrateBtn.disabled = true;
+  migrateBtn.textContent = 'Migrating…';
+  try {
+    const legacySnap = await getDocs(collection(db, 'candidates'));
+    const docs = [];
+    legacySnap.forEach(d => docs.push({ id: d.id, data: d.data() }));
+    if (docs.length === 0) {
+      flash('No legacy candidates found — nothing to migrate.', true);
+      return;
+    }
+    const chunks = [];
+    for (let i = 0; i < docs.length; i += 450) chunks.push(docs.slice(i, i + 450));
+    for (const chunk of chunks) {
+      const batch = writeBatch(db);
+      chunk.forEach(d => batch.set(doc(db, 'locations', 'portugal', 'candidates', d.id), d.data));
+      await batch.commit();
+    }
+    flash(`Migrated ${docs.length} candidate(s) into Portugal.`, true);
+    loadOverview();
+  } catch (err) {
+    flash('Migration failed: ' + err.message, false);
+  } finally {
+    migrateBtn.disabled = false;
+    migrateBtn.textContent = 'Migrate legacy candidates → Portugal';
+  }
+});
+
 // ---- Load & render employee list ----
 async function loadUsers() {
-  userRows.innerHTML = '<tr><td colspan="4" style="color:var(--ink-dim);">Loading…</td></tr>';
+  userRows.innerHTML = '<tr><td colspan="5" style="color:var(--ink-dim);">Loading…</td></tr>';
   const snap = await getDocs(collection(db, 'users'));
-  const users = [];
-  snap.forEach(d => users.push({ id: d.id, ...d.data() }));
-  users.sort((a, b) => (a.name || a.email || '').localeCompare(b.name || b.email || ''));
+  allUsers = [];
+  snap.forEach(d => allUsers.push({ id: d.id, ...d.data() }));
+  allUsers.sort((a, b) => (a.name || a.email || '').localeCompare(b.name || b.email || ''));
 
-  if (users.length === 0) {
-    userRows.innerHTML = '<tr><td colspan="4" style="color:var(--ink-dim);">No employees yet.</td></tr>';
+  if (allUsers.length === 0) {
+    userRows.innerHTML = '<tr><td colspan="5" style="color:var(--ink-dim);">No employees yet.</td></tr>';
     return;
   }
 
   userRows.innerHTML = '';
-  users.forEach(u => {
+  allUsers.forEach(u => {
     const tr = document.createElement('tr');
     const isActive = u.active !== false;
     const isAdmin  = u.role === 'admin';
+    const grants = u.locations || {};
+
+    let locCell;
+    if (isAdmin) {
+      locCell = '<span class="loc-badge" style="color:var(--accent-2);">All locations</span>';
+    } else if (allLocations.length === 0) {
+      locCell = '<span style="color:var(--ink-dim); font-size:11px;">No locations set up</span>';
+    } else {
+      locCell = '<div class="loc-checks">' + allLocations.map(l => `
+        <label class="loc-check"><input type="checkbox" class="user-loc-check" data-uid="${u.id}" data-loc="${l.id}" ${grants[l.id] === true ? 'checked' : ''} /> ${l.flag || ''} ${escapeHtml(l.name || l.id)}</label>
+      `).join('') + '</div>';
+    }
+
     tr.innerHTML = `
       <td>
         <div class="name">${escapeHtml(u.name || '(no name)')}</div>
@@ -220,6 +475,7 @@ async function loadUsers() {
       </td>
       <td><span class="badge ${isAdmin ? 'admin' : 'employee'}">${isAdmin ? 'Admin' : 'Employee'}</span></td>
       <td><span class="badge ${isActive ? 'active' : 'inactive'}">${isActive ? 'Active' : 'Deactivated'}</span></td>
+      <td>${locCell}</td>
       <td class="row-actions">
         <button class="btn" data-action="reset" data-id="${u.id}" data-email="${escapeHtml(u.email || '')}">Send reset email</button>
         <button class="btn" data-action="role" data-id="${u.id}" data-role="${isAdmin ? 'employee' : 'admin'}">${isAdmin ? 'Make employee' : 'Make admin'}</button>
@@ -230,9 +486,21 @@ async function loadUsers() {
   });
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
+// ---- Per-user location checkbox changes ----
+userRows.addEventListener('change', async (e) => {
+  const cb = e.target.closest('.user-loc-check');
+  if (!cb) return;
+  const uid = cb.dataset.uid;
+  const locId = cb.dataset.loc;
+  try {
+    await updateDoc(doc(db, 'users', uid), { ['locations.' + locId]: cb.checked });
+    flash(`Location access updated.`, true);
+    loadOverview();
+  } catch (err) {
+    cb.checked = !cb.checked;
+    flash('Update failed: ' + err.message, false);
+  }
+});
 
 // ---- Row action clicks (event delegation) ----
 userRows.addEventListener('click', async (e) => {
@@ -284,6 +552,8 @@ addForm.addEventListener('submit', async (e) => {
   const email = document.getElementById('newEmail').value.trim();
   const password = document.getElementById('newPassword').value;
   const role = document.getElementById('newRole').value;
+  const locations = {};
+  document.querySelectorAll('.new-loc-check').forEach(cb => { locations[cb.dataset.loc] = cb.checked; });
 
   if (!name || !email || password.length < 6) {
     return flash('Please fill in all fields (password needs 6+ characters).', false);
@@ -302,7 +572,7 @@ addForm.addEventListener('submit', async (e) => {
     await deleteApp(secondaryApp);
 
     await setDoc(doc(db, 'users', uid), {
-      name, email, role, active: true, createdAt: serverTimestamp()
+      name, email, role, active: true, locations, createdAt: serverTimestamp()
     });
 
     flash(`Account created for ${name}. Share the password with them directly.`, true);
