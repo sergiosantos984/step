@@ -23,6 +23,7 @@ import {
   deleteDoc,
   collection,
   getDocs,
+  getCountFromServer,
   onSnapshot,
   writeBatch,
   serverTimestamp
@@ -58,6 +59,7 @@ export {
   deleteDoc,
   collection,
   getDocs,
+  getCountFromServer,
   onSnapshot,
   writeBatch,
   serverTimestamp
